@@ -1,0 +1,24 @@
+# dependencies and build output
+node_modules/
+dist/
+dist-new/
+release/
+out/
+
+# things the app and its tests create next to a pack, never part of the source
+*.bak
+.cs_journal.json
+*.csproj
+
+# editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+npm-debug.log*
+
+# local scratch
+scratch/
+tmp/

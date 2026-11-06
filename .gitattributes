@@ -1,0 +1,14 @@
+# keep line endings sane and never touch binary files
+* text=auto
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+
+*.ytd binary
+*.ydd binary
+*.ymt binary
+*.dat binary
+*.png binary
+*.ico binary

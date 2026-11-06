@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ClothingStudio</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">Clothing<b>Studio</b></div>
+    <button id="btnOpen" class="btn">Open pack…</button>
+    <div id="packName" class="muted">Drop a clothing resource folder anywhere</div>
+    <button id="ymtChip" class="ymt" hidden title="The pack's .ymt tells the game how many textures each piece has">.ymt</button>
+    <div id="current" class="crumb"></div>
+    <button id="btnOptions" class="mini wide" hidden title="Audio, flags, render flag, hair scale, high heels, shows-skin for the open piece">⚙ Options</button>
+    <div class="spacer"></div>
+    <button id="btnUndo" class="btn ghost" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btnRedo" class="btn ghost" title="Redo (Ctrl+Y)">Redo</button>
+    <span class="sep"></span>
+    <button id="btnProjOpen" class="btn ghost" title="Open a layered project">Open layers…</button>
+    <button id="btnProjSave" class="btn ghost" title="Save layers so you can keep editing later">Save layers…</button>
+    <button id="btnExport" class="btn">Export PNG</button>
+    <button id="btnSave" class="btn accent" title="Write the painting into the .ytd (a .bak backup is kept)">Save to YTD</button>
+  </header>
+
+  <aside id="left">
+    <section class="panel grow">
+      <h3>Pack
+        <span class="tools">
+          <button id="pAdd" class="mini wide accent" title="Add .ydd models (and their textures) to the pack">Add piece…</button>
+          <button id="pNew" class="mini wide" title="Start a new, empty FiveM clothing resource">New</button>
+          <button id="pBuild" class="mini wide" title="Write a clean FiveM resource (manifest, .meta, .ymt, stream files) to a folder">Build</button>
+        </span>
+      </h3>
+      <div class="treefilter"><input id="treeFilter" type="search" placeholder="Filter pieces…" spellcheck="false" autocomplete="off"></div>
+      <div id="tree" class="scroll"><p class="hint">Open or drop a resource folder such as <code>js_gsp</code>. Male and female pieces appear here.</p></div>
+    </section>
+    <section class="panel layers">
+      <h3>Layers <span id="lCount" class="lcount"></span><span class="lhint">top of the list = in front</span></h3>
+      <div class="ltools" id="layerTools">
+        <button id="lAdd" class="ltool" title="New layer: an empty, see-through layer above the selected one"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span></button>
+        <button id="lDup" class="ltool" title="Duplicate: make a copy of the selected layer (a text layer stays editable)"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg><span>Duplicate</span></button>
+        <button id="lUp" class="ltool" title="Move the selected layer up, in front of the one above it"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span>Up</span></button>
+        <button id="lDown" class="ltool" title="Move the selected layer down, behind the one below it"><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg><span>Down</span></button>
+        <button id="lLock" class="ltool" title="Lock the selected layer so it cannot be painted on, moved, resized, merged or deleted by accident"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>Lock</span></button>
+        <button id="lMerge" class="ltool" title="Merge down: join the selected layer into the layer below it (they become one)"><svg viewBox="0 0 24 24"><path d="M12 3v11M7 10l5 5 5-5M5 20h14"/></svg><span>Merge</span></button>
+        <button id="lRename" class="ltool" title="Rename the selected layer (or double-click its name)"><svg viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z"/></svg><span>Rename</span></button>
+        <button id="lDel" class="ltool danger" title="Delete the selected layer (Undo brings it back)"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M10 11v6M14 11v6"/></svg><span>Delete</span></button>
+      </div>
+      <div id="layerList" class="scroll"></div>
+      <div class="row">
+        <label>Opacity</label><input id="lOpacity" type="range" min="0" max="100" value="100"><span id="lOpacityV" class="val">100</span>
+      </div>
+      <div class="row">
+        <label>Blend</label><select id="lBlend"></select>
+      </div>
+      <div class="row">
+        <button id="lImport" class="btn small">Import image…</button>
+        <button id="lGuideImport" class="btn small" title="Use an image as a see-through guide">As guide…</button>
+      </div>
+    </section>
+  </aside>
+
+  <main id="center">
+    <div id="optbar">
+      <div class="opt"><label>Size</label><input id="oSize" type="range" min="1" max="400" value="28"><span id="oSizeV" class="val">28</span></div>
+      <div class="opt"><label>Hardness</label><input id="oHard" type="range" min="0" max="100" value="85"><span id="oHardV" class="val">85</span></div>
+      <div class="opt"><label>Opacity</label><input id="oOpac" type="range" min="1" max="100" value="100"><span id="oOpacV" class="val">100</span></div>
+      <div class="opt" data-for="fill"><label>Tolerance</label><input id="oTol" type="range" min="0" max="128" value="24"><span id="oTolV" class="val">24</span></div>
+      <label class="opt chk" data-for="shape"><input id="oFill" type="checkbox"> Filled</label>
+      <label class="opt chk"><input id="oSym" type="checkbox"> Mirror</label>
+      <div class="opt textbar" data-for="text" hidden>
+        <div class="tg"><div class="tcap">Font</div><div class="trow">
+          <button id="oFont" class="btn fontbtn" title="Pick the font. You can also type any font name that is installed on this PC."><span id="oFontName">Arial</span> <span class="caret">▾</span></button>
+          <input id="oFontSize" type="number" min="6" max="900" step="1" value="96" title="Text size in texture pixels"><span class="tunit">px</span>
+        </div></div>
+        <div class="tg"><div class="tcap">Style</div><div class="trow">
+          <button id="oBold" class="tbtn" title="Bold"><b>B</b></button>
+          <button id="oItalic" class="tbtn" title="Italic"><i>I</i></button>
+          <button id="oUnder" class="tbtn" title="Underline"><u>U</u></button>
+          <button id="oStrike" class="tbtn" title="Strikethrough"><s>S</s></button>
+          <button id="oCaps" class="tbtn" title="ALL CAPITAL LETTERS">TT</button>
+        </div></div>
+        <div class="tg"><div class="tcap">Align</div><div class="trow">
+          <button class="tbtn on" data-align="left" title="Align left"><svg width="16" height="14" viewBox="0 0 14 12"><path d="M1 1.5h12M1 4.5h8M1 7.5h12M1 10.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+          <button class="tbtn" data-align="center" title="Centre"><svg width="16" height="14" viewBox="0 0 14 12"><path d="M1 1.5h12M3 4.5h8M1 7.5h12M3 10.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+          <button class="tbtn" data-align="right" title="Align right"><svg width="16" height="14" viewBox="0 0 14 12"><path d="M1 1.5h12M5 4.5h8M1 7.5h12M5 10.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div></div>
+        <div class="tg"><div class="tcap">Mirror and turn</div><div class="trow">
+          <button id="oFlipH" class="tbtn wide" title="Mirror the text left ↔ right, so it reads backwards">↔ Flip</button>
+          <button id="oFlipV" class="tbtn wide" title="Mirror the text upside down">↕ Flip</button>
+          <label for="oAngle">Turn</label><input id="oAngle" type="number" min="-360" max="360" step="1" value="0" title="Turn the text by this many degrees"><span class="tunit">°</span>
+        </div></div>
+        <div class="tg"><div class="tcap">Spacing</div><div class="trow">
+          <label for="oSpacing">Letters</label><input id="oSpacing" type="number" min="-50" max="300" step="1" value="0" title="Space between the letters, in pixels (can be negative)">
+          <label for="oLeading">Lines</label><input id="oLeading" type="number" min="50" max="400" step="5" value="120" title="Line height as a percentage of the text size"><span class="tunit">%</span>
+        </div></div>
+        <div class="tg"><div class="tcap">Outline</div><div class="trow">
+          <input id="oStroke" type="number" min="0" max="80" step="1" value="0" title="Outline thickness in pixels (0 = no outline)"><span class="tunit">px</span>
+          <input id="oStrokeColor" type="color" value="#ffffff" title="Outline colour">
+        </div></div>
+        <div class="tg"><div class="tcap">Shadow</div><div class="trow">
+          <label class="chk" title="Switch the drop shadow on or off"><input id="oShadow" type="checkbox"> On</label>
+          <input id="oShadowColor" type="color" value="#000000" title="Shadow colour">
+          <label for="oShadowBlur">Soft</label><input id="oShadowBlur" type="number" min="0" max="100" step="1" value="8" title="How soft the shadow edge is (pixels)">
+          <label for="oShadowX">Across</label><input id="oShadowX" type="number" min="-200" max="200" step="1" value="6" title="How far the shadow sits to the right (negative = left)">
+          <label for="oShadowY">Down</label><input id="oShadowY" type="number" min="-200" max="200" step="1" value="6" title="How far the shadow sits down (negative = up)">
+        </div></div>
+        <div class="tg tactions"><div class="tcap">&nbsp;</div><div class="trow">
+          <button id="oFontFile" class="btn" title="Load a .ttf / .otf / .woff font file from your PC (it stays loaded until you close the app)">Add font file…</button><input id="oFontFileIn" type="file" accept=".ttf,.otf,.woff,.woff2" hidden>
+          <button id="oTextEdit" class="btn" title="Open the text of the selected text layer for editing (or just click the text on the texture)" disabled>Edit text layer</button>
+          <button id="oTextApply" class="btn accent" title="Keep the text as it is (Ctrl+Enter)" disabled>Place text</button>
+          <button id="oTextCancel" class="btn" title="Throw the changes away (Esc)" disabled>Cancel</button>
+        </div></div>
+      </div>
+      <div class="opt" id="xfBar" data-for="xform" hidden>
+        <label>W</label><input id="xW" type="number" min="1" max="16384" step="1" title="Width in pixels">
+        <label>H</label><input id="xH" type="number" min="1" max="16384" step="1" title="Height in pixels">
+        <label class="chk" title="Keep the proportions when you type a width or height, and when you drag a corner (hold Shift to stretch freely)"><input id="xLock" type="checkbox" checked> Lock ratio</label>
+        <label>Scale</label><input id="xS" type="number" min="1" max="3000" step="1" title="Uniform scale in percent"><span class="muted">%</span>
+        <label>Angle</label><input id="xA" type="number" min="-360" max="360" step="1" title="Rotation in degrees"><span class="muted">°</span>
+        <button id="xFlipH" class="btn small" title="Mirror left / right">Flip ↔</button>
+        <button id="xFlipV" class="btn small" title="Mirror up / down">Flip ↕</button>
+        <button id="xFit" class="btn small" title="Fit the whole image inside the texture">Fit</button>
+        <button id="xFill" class="btn small" title="Cover the whole texture (may crop)">Fill</button>
+        <button id="xStretch" class="btn small" title="Stretch to exactly the texture size">Stretch</button>
+        <button id="xReset" class="btn small" title="Back to the original size and position">Reset</button>
+        <button id="xApply" class="btn small accent" title="Bake the change into the layer (Enter)">Apply</button>
+        <button id="xCancel" class="btn small" title="Throw the change away (Esc)">Cancel</button>
+        <span id="xfNote" class="muted"></span>
+      </div>
+      <div class="spacer"></div>
+      <label class="opt chk"><input id="oGuide" type="checkbox" checked> UV guide</label>
+      <div class="opt"><input id="oGuideA" type="range" min="5" max="100" value="55" title="UV guide strength"></div>
+    </div>
+    <div id="work">
+      <nav id="toolstrip">
+        <button data-tool="brush" class="tool active" title="Brush (B)">Brush</button>
+        <button data-tool="eraser" class="tool" title="Eraser (E)">Erase</button>
+        <button data-tool="fill" class="tool" title="Fill (G)">Fill</button>
+        <button data-tool="eyedrop" class="tool" title="Pick color (I, or Alt+click)">Pick</button>
+        <button data-tool="line" class="tool" title="Line (L)">Line</button>
+        <button data-tool="rect" class="tool" title="Rectangle (R)">Rect</button>
+        <button data-tool="ellipse" class="tool" title="Ellipse (O)">Oval</button>
+        <button data-tool="text" class="tool" title="Text (T)">Text</button>
+        <button data-tool="move" class="tool" title="Move layer (V). Mouse wheel scales it">Move</button>
+        <button data-tool="transform" class="tool" title="Resize / rotate / flip the layer (S or Ctrl+T)">Resize</button>
+        <div class="grow"></div>
+        <button id="zFit" class="tool small" title="Fit canvas to view (F)">Fit</button>
+        <button id="z100" class="tool small" title="100% zoom">1:1</button>
+      </nav>
+      <div id="viewport">
+        <div id="world"><canvas id="view"></canvas><canvas id="overlay"></canvas></div>
+        <canvas id="handles"></canvas>
+        <div id="cursor"></div>
+        <textarea id="textBox" hidden spellcheck="false" wrap="off" autocomplete="off" rows="1" aria-label="Text to paint"></textarea>
+        <div id="textGrip" hidden title="Drag to move the text">✥</div>
+        <div id="empty">Open a pack, then pick a piece on the left to start painting.</div>
+      </div>
+    </div>
+    <footer id="statusbar"><span id="stPos">–</span><span id="stZoom">100%</span><span id="stSize">–</span><span id="stMsg" class="grow"></span></footer>
+  </main>
+
+  <aside id="right">
+    <section class="panel viewer" id="viewerPanel">
+      <h3>3D preview
+        <span class="tools">
+          <button id="vPop" class="mini wide" title="Open the 3D view in its own window - drag it to another monitor. It keeps updating live while you paint.">Pop out</button>
+          <button id="vFull" class="mini wide" title="Full screen the 3D view (F11, Esc to leave)">Full</button>
+          <button id="vBody" class="mini wide" title="Show a ped body from your GTA V install">Body</button>
+          <button id="vReset" class="mini wide" title="Reset camera">Reset</button>
+          <button id="vWire" class="mini wide" title="Wireframe">Wire</button>
+          <button id="vBack" class="mini wide" title="Dark / light background">Bg</button>
+        </span>
+      </h3>
+      <div id="viewer3d"></div>
+      <div id="vInfo" class="muted small">Drag to orbit · wheel to zoom · right-drag to pan</div>
+    </section>
+    <section class="panel color">
+      <h3>Color
+        <span class="tools"><button id="cScreen" class="mini wide" title="Pick a colour from anywhere on your screen">Screen pick</button></span>
+      </h3>
+      <div class="colorbody">
+        <canvas id="wheel" width="172" height="172" title="Outer ring = hue · inner square = saturation (left to right) and brightness (bottom to top)"></canvas>
+        <div class="colorside">
+          <div class="crow">
+            <div id="cNow" class="cswatch" title="Current colour"></div>
+            <div id="cPrev" class="cswatch" title="Previous colour - click (or press X) to swap"></div>
+            <input id="cHex" type="text" value="#e03131" maxlength="7" spellcheck="false" title="Hex colour">
+          </div>
+          <div class="crow"><label>H</label><input id="cH" class="grad" type="range" min="0" max="360" value="0"><span id="cHV" class="val"></span></div>
+          <div class="crow"><label>S</label><input id="cS" class="grad" type="range" min="0" max="100" value="0"><span id="cSV" class="val"></span></div>
+          <div class="crow"><label>B</label><input id="cV" class="grad" type="range" min="0" max="100" value="0"><span id="cVV" class="val"></span></div>
+          <div class="crow rgb">
+            <label>R</label><input id="cR" type="number" min="0" max="255">
+            <label>G</label><input id="cG" type="number" min="0" max="255">
+            <label>B</label><input id="cB" type="number" min="0" max="255">
+          </div>
+        </div>
+      </div>
+      <div id="swatches"></div>
+    </section>
+  </aside>
+</div>
+
+<div id="pieceDlg" hidden>
+  <div class="card wide">
+    <h4>Add pieces to the pack</h4>
+    <p class="pd-intro">Each model gets the next free number of its category and is named the way FiveM expects. If a name does not say what the model is, choose it here. Each piece needs a texture: add PNG / JPG / .ytd files, or use a plain grey one.</p>
+    <div id="pdRows"></div>
+    <div class="btns">
+      <button id="pdMore" class="btn">Add more .ydd…</button>
+      <span class="grow"></span>
+      <button id="pdCancel" class="btn">Cancel</button>
+      <button id="pdOk" class="btn accent">Add to pack</button>
+    </div>
+  </div>
+</div>
+
+<div id="optDlg" hidden>
+  <div class="card">
+    <h4 id="odTitle">Piece options</h4>
+    <div id="odBody"></div>
+    <div class="btns">
+      <span class="grow od-note" id="odNote"></span>
+      <button id="odCancel" class="btn">Cancel</button>
+      <button id="odOk" class="btn accent">Apply</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<div id="modal" hidden><div class="card"><h4 id="mTitle"></h4><div id="mBody"></div><div id="mBtns" class="btns"></div></div></div>
+<div id="dropHint" hidden><div>Drop the resource folder to open it</div></div>
+
+<script src="js/paint.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

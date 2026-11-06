@@ -1,0 +1,24 @@
+{
+  "name": "clothing-studio",
+  "productName": "ClothingStudio",
+  "version": "0.2.0",
+  "description": "Paint GTA V / FiveM addon clothing textures with a live 3D preview, and manage the pieces of a clothing pack (add, move, delete, options, .ymt) in one desktop app.",
+  "main": "main.js",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "keywords": ["gta5", "fivem", "clothing", "addon", "eup", "ytd", "ydd", "ymt", "texture", "electron", "codewalker"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "electron .",
+    "dev": "node dev-server.js",
+    "test": "node --test test/*.test.js",
+    "package": "electron-packager . ClothingStudio --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/dist\" --ignore=\"^/test\" --ignore=\"^/docs\" --ignore=\"^/.github\" --ignore=\"^/dev-server.js\""
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.2.3"
+  }
+}
