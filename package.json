@@ -6,12 +6,15 @@
   "main": "main.js",
   "private": true,
   "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/jax-shane/ClothingStudio#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/jax-shane/ClothingStudio.git" },
+  "bugs": { "url": "https://github.com/jax-shane/ClothingStudio/issues" },
   "keywords": ["gta5", "fivem", "clothing", "addon", "eup", "ytd", "ydd", "ymt", "texture", "electron", "codewalker"],
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "electron .",
     "dev": "node dev-server.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test",
     "package": "electron-packager . ClothingStudio --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/dist\" --ignore=\"^/test\" --ignore=\"^/docs\" --ignore=\"^/.github\" --ignore=\"^/dev-server.js\""
   },
   "dependencies": {

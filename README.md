@@ -4,10 +4,11 @@
 
 **Paint GTA V / FiveM addon clothing with a live 3D preview, and manage the whole clothing pack from one app.**
 
+[![Download](https://img.shields.io/github/v/release/jax-shane/ClothingStudio?label=download&color=2f6fe0)](https://github.com/jax-shane/ClothingStudio/releases/latest)
+[![Tests](https://github.com/jax-shane/ClothingStudio/actions/workflows/test.yml/badge.svg)](https://github.com/jax-shane/ClothingStudio/actions/workflows/test.yml)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)
 ![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848f)
-![Tests: 100+](https://img.shields.io/badge/tests-100%2B%20passing-3fb950)
 
 <img src="docs/images/overview.png" alt="ClothingStudio: texture painter on the left and centre, live 3D preview and colour wheel on the right" width="100%">
 
@@ -72,7 +73,7 @@ can see exactly what you are painting.
 
 ## Quick start
 
-**Easiest: download the ready-to-run program.** Open the **[Releases](../../releases)** page, download
+**Easiest: download the ready-to-run program.** Open the **[latest release](https://github.com/jax-shane/ClothingStudio/releases/latest)**, download
 `ClothingStudio-…-win-x64.zip`, unzip it anywhere (your desktop, a USB stick) and double-click `ClothingStudio.exe`.
 Nothing to install. (Windows may warn about an "unknown publisher" because the program is not code-signed: choose
 *More info → Run anyway*, or build it yourself from the source as below.)

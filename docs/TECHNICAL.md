@@ -139,7 +139,7 @@ a second `BrowserWindow` that receives the mesh and a stream of texture frames o
 npm test
 ```
 
-runs `node --test test/*.test.js`: **100+ tests, a few seconds, no game files, no network, nothing outside the OS temp folder.** They build
+runs `node --test` (every file in `test/`): **100+ tests, a few seconds, no game files, no network, nothing outside the OS temp folder.** They build
 packs from the blank texture template in `src/lib/assets/`, with stand-in `.ydd` files (pack operations never parse a model).
 
 | File | Covers |
