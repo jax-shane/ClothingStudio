@@ -28,6 +28,7 @@
       this.locked = false;   // a locked layer cannot be painted on, moved, resized, merged or deleted
       this.text = null;      // live text: the settings the layer's text was painted with, so it can be edited again (cleared as soon as the pixels are changed any other way)
       this.editing = false;  // the text editor has this layer open: it is not drawn meanwhile (the editor shows a preview instead)
+      this.autoPaint = null; // set on the layer that paint tools made above a live text layer (so the next stroke reuses it instead of making another)
     }
     clone() {
       const l = new Layer(this.canvas.width, this.canvas.height, this.name);
@@ -169,8 +170,10 @@
     while (d.undo.length > cap) d.undo.shift();
   }
   /** Undo point for a pixel change of the active layer. Changing pixels any other way than the text editor turns live text into plain pixels. */
+  let skipPx = null;            // a layer that was just created for a stroke: creating it already made the undo point
   function pushPx(keepText) {
     const d = E.doc, L = layer();
+    if (skipPx) { const s = skipPx; skipPx = null; if (s === L) { d.dirty = true; return; } }
     d.undo.push({ k: 'px', i: d.active, data: L.ctx.getImageData(0, 0, d.w, d.h), text: L.text });
     if (!keepText) L.text = null;
     trim(d); d.redo.length = 0; d.dirty = true;
@@ -241,6 +244,7 @@
       below.ctx.globalAlpha = top.opacity; below.ctx.globalCompositeOperation = top.blend;
       below.ctx.drawImage(top.canvas, 0, 0);
       below.ctx.globalAlpha = 1; below.ctx.globalCompositeOperation = 'source-over';
+      below.text = null;                                 // the layer below now holds more than its text: it becomes plain pixels
       d.layers.splice(d.active, 1); d.active -= 1;
       emit('layers'); emit('change', { final: true }); E.render();
     },
@@ -504,14 +508,87 @@
     return rgbHex(px[0], px[1], px[2]);
   };
 
+  // ---------------------------------------------------------------- live text under the paint, move and resize tools
+  // Text layers keep their text as settings (layer.text) so it can be retyped. Anything that rewrites the layer's pixels
+  // would lose that, so: brush / line / shapes paint on a layer of their own above the text; Move and Resize change the
+  // text settings instead of the pixels (move, scale, turn and mirror all stay live); only erasing, filling and
+  // stretching one way only (which text settings cannot express) turn the text into plain pixels.
+  const round2 = (v) => Math.round(v * 100) / 100;
+  const LENGTHS = ['size', 'spacing', 'stroke', 'shadowBlur', 'shadowX', 'shadowY'];      // the settings that grow with the text
+  const sizeOk = (m) => m.size >= 6 && m.size <= 2000;
+  function scaledText(m, k) {
+    const n = Object.assign({}, m);
+    for (const key of LENGTHS) if (typeof n[key] === 'number') n[key] = round2(n[key] * k);
+    return n;
+  }
+  /** the text settings after scaling the block k times about the document point (cx, cy); null when the size would leave 6 - 900 */
+  function scaledAround(m, k, cx, cy) {
+    const lay = E.textLayout(m), n = scaledText(m, k);
+    if (!sizeOk(n)) return null;
+    const lay2 = E.textLayout(n);
+    n.x = round2(cx + (m.x + lay.w / 2 - cx) * k - lay2.w / 2);
+    n.y = round2(cy + (m.y + lay.h / 2 - cy) * k - lay2.h / 2);
+    return n;
+  }
+  const paintLive = (L, m) => { L.ctx.clearRect(0, 0, E.doc.w, E.doc.h); E.drawText(L.ctx, m, m.x, m.y); L.text = m; };
+
+  /** What a finished Resize session does to live text: the text settings that give the same picture, or null if there are none (stretched one way). */
+  function liveFromTransform(x) {
+    const m0 = x.beforeText;
+    if (!m0 || Math.abs(x.sx - x.sy) > 0.01 * Math.max(x.sx, x.sy)) return null;
+    const k = (x.sx + x.sy) / 2, n = scaledText(m0, k);
+    if (!sizeOk(n)) return null;
+    const lay0 = E.textLayout(m0);
+    const C0 = { x: m0.x + lay0.w / 2, y: m0.y + lay0.h / 2 };                                  // middle of the text block before
+    const rot = (a) => [[Math.cos(a), -Math.sin(a)], [Math.sin(a), Math.cos(a)]];
+    const mul = (A, B) => [[A[0][0] * B[0][0] + A[0][1] * B[1][0], A[0][0] * B[0][1] + A[0][1] * B[1][1]], [A[1][0] * B[0][0] + A[1][1] * B[1][0], A[1][0] * B[0][1] + A[1][1] * B[1][1]]];
+    const F = [[x.fx, 0], [0, x.fy]], F0 = [[m0.flipH ? -1 : 1, 0], [0, m0.flipV ? -1 : 1]];
+    const Rho = rot(x.rot);
+    const M = mul(mul(mul(Rho, F), rot(((m0.rot || 0) * Math.PI) / 180)), F0);                  // the text's new orientation: a turn, or a turn plus one mirror
+    let r1, flip = false;
+    if (M[0][0] * M[1][1] - M[0][1] * M[1][0] > 0) r1 = Math.atan2(M[1][0], M[0][0]);
+    else { flip = true; r1 = Math.atan2(-M[1][0], -M[0][0]); }
+    const v = { x: C0.x - x.home.cx, y: C0.y - x.home.cy };
+    const Fv = { x: x.fx * v.x, y: x.fy * v.y };
+    const C1 = { x: x.cx + k * (Rho[0][0] * Fv.x + Rho[0][1] * Fv.y), y: x.cy + k * (Rho[1][0] * Fv.x + Rho[1][1] * Fv.y) };   // where the middle of the block ends up
+    // the shadow is dragged along with the picture while you resize, so the finished text must put it where the preview showed it
+    const sv = { x: x.fx * (m0.shadowX || 0), y: x.fy * (m0.shadowY || 0) };
+    n.shadowX = round2(k * (Rho[0][0] * sv.x + Rho[0][1] * sv.y)); n.shadowY = round2(k * (Rho[1][0] * sv.x + Rho[1][1] * sv.y));
+    n.rot = round2((((r1 * 180) / Math.PI) % 360 + 540) % 360 - 180);
+    n.flipH = flip; n.flipV = false;
+    const lay1 = E.textLayout(n);
+    n.x = round2(C1.x - lay1.w / 2); n.y = round2(C1.y - lay1.h / 2);
+    return n;
+  }
+
+  /** The active layer is live text and a brush / line / shape is about to paint: use (or make) a layer of its own just above it. */
+  function paintAbove() {
+    settle();
+    const d = E.doc, t = layer(), up = d.layers[d.active + 1];
+    if (up && up.autoPaint === t && up.visible && !up.locked) { d.active += 1; emit('layers'); return; }
+    pushStruct();                                                  // creating the layer is the undo step of this first stroke
+    const A = new Layer(d.w, d.h, 'Paint over text');
+    A.autoPaint = t;
+    d.layers.splice(d.active + 1, 0, A); d.active += 1;
+    skipPx = A;
+    emit('layers');
+    emit('note', 'Your painting went on a new layer above the text, so the text can still be edited. (Merge the two layers if you want them as one.)');
+  }
+
   // ---------------------------------------------------------------- pointer API
-  let shapeStart = null, moveBase = null, moveStart = null;
+  let shapeStart = null, moveBase = null, moveStart = null, moveMeta = null;
 
   E.down = (pt, mods) => {
-    const o = E.opts, d = E.doc, L = layer(), p = { x: pt.x, y: pt.y, p: pt.pressure || 1 };
+    const o = E.opts, d = E.doc, p = { x: pt.x, y: pt.y, p: pt.pressure || 1 };
+    let L = layer();
     mods = mods || {};
     if (!L.visible && ['brush', 'eraser', 'fill', 'text', 'move'].includes(o.tool)) { emit('warn', 'The active layer is hidden.'); return; }
     if (L.locked && ['brush', 'eraser', 'fill', 'text', 'move', 'line', 'rect', 'ellipse'].includes(o.tool)) { emit('warn', 'The active layer is locked. Unlock it (padlock in the Layers list) to edit it.'); return; }
+    skipPx = null;
+    if (L.text) {
+      if (['brush', 'line', 'rect', 'ellipse'].includes(o.tool)) { paintAbove(); L = layer(); }
+      else if (['eraser', 'fill'].includes(o.tool)) emit('note', 'Erasing and filling work on pixels, so the text on this layer became plain pixels. Undo (Ctrl+Z) brings the editable text back.');
+    }
     switch (o.tool) {
       case 'brush':
         pushPx();
@@ -532,8 +609,9 @@
         E.drawing = true; shapeStart = { x: pt.x, y: pt.y };
         break;
       case 'move':
-        pushPx();
         E.drawing = true; moveStart = { x: pt.x, y: pt.y };
+        if (L.text) { pushPx(true); moveMeta = L.text; break; }            // live text: the text settings move, the text stays editable
+        pushPx();
         moveBase = mk(d.w, d.h); moveBase.getContext('2d').drawImage(L.canvas, 0, 0);
         break;
       default: return;
@@ -552,6 +630,7 @@
         drawShape(E.octx, o.tool, shapeStart, { x: pt.x, y: pt.y }, mods && mods.shift);
         return;
       case 'move':
+        if (moveMeta) { paintLive(L, Object.assign({}, moveMeta, { x: moveMeta.x + Math.round(pt.x - moveStart.x), y: moveMeta.y + Math.round(pt.y - moveStart.y) })); break; }
         L.ctx.clearRect(0, 0, d.w, d.h);
         L.ctx.drawImage(moveBase, Math.round(pt.x - moveStart.x), Math.round(pt.y - moveStart.y));
         break;
@@ -577,9 +656,10 @@
         drawShape(L.ctx, o.tool, shapeStart, { x: pt.x, y: pt.y }, mods && mods.shift);
         shapeStart = null;
         break;
-      case 'move': moveBase = null; break;
+      case 'move': moveBase = null; moveMeta = null; break;
       default: break;
     }
+    skipPx = null;
     E.drawing = false;
     emit('change', { final: true }); E.render();
   };
@@ -591,6 +671,15 @@
     if (!L.visible) return;
     if (L.locked) { emit('warn', 'The active layer is locked.'); return; }
     const now = performance.now();
+    if (L.text) {                                                      // live text: scale the text itself, it stays editable
+      const n = scaledAround(L.text, factor, cx, cy);
+      if (!n) { emit('warn', 'The text cannot get any bigger or smaller than that.'); return; }
+      if (now - lastScaleUndo > 600) pushPx(true);
+      lastScaleUndo = now;
+      paintLive(L, n);
+      emit('change', { final: true }); E.render();
+      return;
+    }
     if (now - lastScaleUndo > 600) pushPx();
     lastScaleUndo = now;
     const copy = mk(d.w, d.h); copy.getContext('2d').drawImage(L.canvas, 0, 0);
@@ -679,7 +768,15 @@
     const d = E.doc, L = d.layers[x.layerIndex];
     E.xf = null;
     if (x.changed) {
-      if (apply) { d.undo.push({ k: 'px', i: x.layerIndex, data: x.before, text: x.beforeText }); L.text = null; trim(d); d.redo.length = 0; d.dirty = true; }
+      if (apply) {
+        d.undo.push({ k: 'px', i: x.layerIndex, data: x.before, text: x.beforeText }); trim(d); d.redo.length = 0; d.dirty = true;
+        L.text = null;
+        if (x.beforeText) {                                            // live text: move, scale, turn and mirror keep it live and sharp (painted again, not resampled)
+          const m = liveFromTransform(x);
+          if (m) paintLive(L, m);
+          else emit('note', 'That resize turned the text into plain pixels (text settings cannot stretch it one way only, or make it smaller than 6 or bigger than 2000), so it can no longer be retyped. Undo (Ctrl+Z) brings the editable text back.');
+        }
+      }
       else { L.ctx.putImageData(x.before, 0, 0); d.dirty = x.wasDirty; }
       emit('change', { final: true }); E.render();
     }

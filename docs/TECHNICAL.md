@@ -121,8 +121,15 @@ A layer may carry `layer.text`, the description of the text it contains:
   the outline if there is one, else from the fill).
 - The editor is a transparent `<textarea>` placed over the canvas, set in the same font at the zoomed size and given the same rotate / mirror
   transform, with a live preview canvas underneath drawn by `drawText`. The layer being edited has `editing = true`, which the compositor skips.
-- Committing calls `addTextLayer` (new) or `updateTextLayer` (existing; one `px` undo entry carrying the old settings). Any other pixel
-  change goes through `pushPx()`, which clears `layer.text` (the layer becomes plain pixels), and undo restores it.
+- Committing calls `addTextLayer` (new) or `updateTextLayer` (existing; one `px` undo entry carrying the old settings).
+- **Keeping the text live.** Every pixel change goes through `pushPx()`, which records the layer's settings in the undo entry and clears
+  `layer.text` unless the caller passes `keepText`. So that the common edits do not lose the text: brush / line / shapes on a live text
+  layer first call `paintAbove()`, which makes (or reuses) a layer above it (`autoPaint`) and uses that layer's creation as the stroke's
+  single undo step (`skipPx`); the Move tool and its wheel change the settings (`paintLive`, `scaledAround`); a finished Resize session
+  is converted by `liveFromTransform()`: it composes the session's rotation / mirror with the text's own to get the new `rot` / `flipH`,
+  moves the block's centre through the transform, scales every length (`size`, `spacing`, `stroke`, shadow) by the uniform factor and turns
+  the shadow offset with the picture, then paints the text again at the new settings. Only erase, fill, merge and a non-uniform stretch
+  (no text settings express it) clear `layer.text`; undo restores it.
 - Live text is saved in `.csproj` files and cloned by *Duplicate*.
 
 ## The 3D view

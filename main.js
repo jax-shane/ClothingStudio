@@ -650,12 +650,61 @@ function textSmokeJs() {
     out.emptyRemoves = P.doc.layers.length === cnt - 1;
     P.undo(); out.emptyUndo = P.doc.layers.length === cnt && P.doc.layers.some((l) => l.text && l.text.text === 'Hello again');
 
-    // 7. painting on a text layer turns it into pixels (no longer editable); Undo makes it text again
-    const idx2 = P.doc.layers.findIndex((l) => l.text && l.text.text === 'Hello again');
-    P.layerOp.select(idx2); cs.setTool('brush');
-    P.opts.size = 20; P.down({ x: 700, y: 700, pressure: 1 }, {}); P.move({ x: 760, y: 700, pressure: 1 }, {}); P.up({ x: 760, y: 700 }, {});
-    out.paintedRasterizes = P.doc.layers[idx2].text === null;
-    P.undo(); out.paintUndoLive = !!P.doc.layers[idx2].text;
+    // 7. THE REPORTED CASE: place text, paint over it with the brush, then edit the text. Painting goes on its own layer; the text stays live.
+    const maskOf = (L) => { const d = L.ctx.getImageData(0, 0, L.canvas.width, L.canvas.height).data, m = new Uint8Array(d.length / 4); for (let i = 0; i < m.length; i++) m[i] = d[i * 4 + 3] > 128 ? 1 : 0; return m; };
+    const iou = (a, b) => { let i = 0, u = 0; for (let k = 0; k < a.length; k++) { if (a[k] && b[k]) i++; if (a[k] || b[k]) u++; } return u ? i / u : 1; };
+    cs.setTool('text'); cs.textBegin(200, 1500); type('Keep me'); $('#oTextApply').click();
+    const tL = P.doc.layers[P.doc.active], tIdx = P.doc.active, nA = P.doc.layers.length, textPx = opaque(tL);
+    cs.setTool('brush'); P.opts.size = 24; P.opts.opacity = 1;
+    P.down({ x: 260, y: 1560, pressure: 1 }, {}); P.move({ x: 360, y: 1560, pressure: 1 }, {}); P.up({ x: 360, y: 1560 }, {});
+    const paintL = P.doc.layers[P.doc.active];
+    out.paintMadeLayer = P.doc.layers.length === nA + 1 && paintL.name === 'Paint over text' && P.doc.layers.indexOf(paintL) === tIdx + 1;
+    out.textStillLive = !!tL.text && P.doc.layers.indexOf(tL) === tIdx && opaque(tL) === textPx;
+    out.marksOnOwnLayer = opaque(paintL) > 0;
+    P.layerOp.select(tIdx);                                                    // back on the text layer, paint again: the same layer is reused
+    P.down({ x: 260, y: 1600, pressure: 1 }, {}); P.move({ x: 360, y: 1600, pressure: 1 }, {}); P.up({ x: 360, y: 1600 }, {});
+    out.reusedPaintLayer = P.doc.layers.length === nA + 1 && P.doc.layers[P.doc.active] === paintL;
+    P.undo(); out.undoStroke2 = P.doc.layers.length === nA + 1;               // second stroke alone
+    P.undo(); out.undoStroke1 = P.doc.layers.length === nA;                   // first stroke and its layer in ONE step
+    P.redo(); P.redo(); out.redoBoth = P.doc.layers.length === nA + 1;
+    cs.setTool('text');
+    const hit7 = cs.textHit(215, 1515);
+    out.hitAfterPaint = hit7 >= 0 && P.doc.layers[hit7] === tL;
+    cs.textEditLayer(hit7); type('Edited after painting'); $('#oTextApply').click();
+    out.editedAfterPaint = P.doc.layers.length === nA + 1 && tL.text && tL.text.text === 'Edited after painting' && opaque(paintL) > 0;
+
+    // 7b. Move tool (drag and wheel) and the Resize tool keep the text live
+    cs.setTool('move'); P.layerOp.select(P.doc.layers.indexOf(tL));
+    const m0 = Object.assign({}, tL.text);
+    P.down({ x: 300, y: 1520, pressure: 1 }, {}); P.move({ x: 340, y: 1550, pressure: 1 }, {}); P.up({ x: 340, y: 1550 }, {});
+    out.moveLive = !!tL.text && tL.text.x === m0.x + 40 && tL.text.y === m0.y + 30;
+    P.undo(); out.moveUndo = !!tL.text && tL.text.x === m0.x; P.redo();
+    P.scaleActive(1.5, 400, 1600);
+    out.wheelLive = !!tL.text && Math.abs(tL.text.size - m0.size * 1.5) < 0.05;
+    P.undo();
+    cs.setTool('transform');
+    const st = P.xformState();
+    P.xformSet({ sx: 1.4, sy: 1.4, rot: 0.3, fx: -1, cx: st.cx + 50, cy: st.cy - 20 }, true);
+    const previewMask = maskOf(tL);
+    P.xformEnd(true);
+    // 1.4 times bigger, turned 0.3 rad (17.19 deg), mirrored left-right: on top of what the text already had (its own mirror and angle)
+    out.resizeLive = !!tL.text && tL.text.flipH === !m0.flipH && Math.abs(tL.text.rot - (17.1887 - m0.rot)) < 0.05 && Math.abs(tL.text.size - m0.size * 1.4) < 0.05;
+    const centre = (m, w) => { let n = 0, sx = 0, sy = 0; for (let k = 0; k < m.length; k++) if (m[k]) { n++; sx += k % w; sy += (k / w) | 0; } return [sx / n, sy / n]; };
+    const c1 = centre(previewMask, tL.canvas.width), c2 = centre(maskOf(tL), tL.canvas.width);
+    out.resizeSamePlace = Math.hypot(c1[0] - c2[0], c1[1] - c2[1]) < 3;           // the re-painted text sits where the dragged preview was
+    out.resizeMatchesPreview = iou(previewMask, maskOf(tL)) > 0.85;
+    out.resizeIoU = Math.round(iou(previewMask, maskOf(tL)) * 1000) / 1000;
+    cs.setTool('transform'); P.xformSet({ sx: 2, sy: 1 }, true); P.xformEnd(true);
+    out.stretchBakes = tL.text === null;
+    P.undo(); out.stretchUndo = !!tL.text;
+    cs.setTool('eraser'); P.opts.size = 30;
+    P.down({ x: 300, y: 1560, pressure: 1 }, {}); P.up({ x: 300, y: 1560 }, {});
+    out.eraserBakes = tL.text === null;
+    P.undo(); out.eraserUndo = !!tL.text;
+    P.layerOp.select(P.doc.layers.indexOf(paintL)); P.layerOp.mergeDown();   // merging paint into the text layer below makes that layer plain pixels
+    out.mergeBakes = tL.text === null;
+    P.undo(); out.mergeUndo = P.doc.layers.some((l) => l.text && l.text.text === 'Edited after painting');   // undo of a merge restores copies of the layers
+    cs.setTool('brush');
 
     // 8. the project file keeps live text
     const ser = P.serialize(); const doc2 = await P.deserialize(ser, P.doc.w, P.doc.h);

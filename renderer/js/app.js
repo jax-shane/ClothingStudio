@@ -1279,7 +1279,7 @@ const TXT = {
   stroke: 0, strokeColor: '#ffffff', shadow: false, shadowColor: '#000000', shadowBlur: 8, shadowX: 6, shadowY: 6,
 };
 const TXT_BOOL = ['bold', 'italic', 'underline', 'strike', 'caps', 'flipH', 'flipV', 'shadow'];
-const TXT_NUM = { size: [6, 900], spacing: [-50, 300], leading: [50, 400], rot: [-360, 360], stroke: [0, 80], shadowBlur: [0, 100], shadowX: [-200, 200], shadowY: [-200, 200] };
+const TXT_NUM = { size: [6, 2000], spacing: [-50, 300], leading: [50, 400], rot: [-360, 360], stroke: [0, 80], shadowBlur: [0, 100], shadowX: [-200, 200], shadowY: [-200, 200] };
 const TEXT_FONTS = [
   'Arial', 'Arial Black', 'Arial Narrow', 'Bahnschrift', 'Calibri', 'Cambria', 'Candara', 'Century Gothic', 'Comic Sans MS', 'Consolas', 'Constantia',
   'Corbel', 'Courier New', 'Franklin Gothic Medium', 'Gabriola', 'Georgia', 'Impact', 'Ink Free', 'Lucida Console', 'Lucida Handwriting',
@@ -1296,7 +1296,7 @@ let fontNamesP = null;
 /** Copy settings into TXT, ignoring anything missing or out of range. */
 function setTxt(p) {
   if (typeof p.family === 'string' && p.family.trim() && p.family.length < 80) TXT.family = p.family.trim();
-  for (const [k, [a, b]] of Object.entries(TXT_NUM)) if (Number.isFinite(p[k])) TXT[k] = clamp(Math.round(p[k]), a, b);
+  for (const [k, [a, b]] of Object.entries(TXT_NUM)) if (Number.isFinite(p[k])) TXT[k] = clamp(Math.round(p[k] * 100) / 100, a, b);   // Move / Resize can leave fractions (a text made 1.37 times bigger)
   for (const k of TXT_BOOL) if (typeof p[k] === 'boolean') TXT[k] = p[k];
   for (const k of ['strokeColor', 'shadowColor']) if (/^#[0-9a-f]{6}$/i.test(p[k])) TXT[k] = p[k];
   if (['left', 'center', 'right'].includes(p.align)) TXT.align = p.align;
@@ -1593,7 +1593,7 @@ function wireText() {
   for (const [id, key] of [['#oFontSize', 'size'], ['#oSpacing', 'spacing'], ['#oLeading', 'leading'], ['#oAngle', 'rot'], ['#oStroke', 'stroke'],
     ['#oShadowBlur', 'shadowBlur'], ['#oShadowX', 'shadowX'], ['#oShadowY', 'shadowY']]) {
     $(id).oninput = (e) => {
-      const v = Math.round(+e.target.value), [a, b] = TXT_NUM[key];
+      const v = Math.round(+e.target.value * 100) / 100, [a, b] = TXT_NUM[key];
       if (e.target.value !== '' && Number.isFinite(v) && v >= a && v <= b) { TXT[key] = v; changed(); }
     };
     $(id).onchange = () => syncTextUi();                    // an out-of-range number snaps back to the real value
@@ -2057,6 +2057,7 @@ async function boot() {
   Paint.on('pick', (c) => setColor(c));
   Paint.on('doc', () => textEnd(false));         // safety net: a different document never inherits an open text box
   Paint.on('warn', (m) => toast(m, 'warn'));
+  Paint.on('note', (m) => toast(m, 'info', 9000));       // things the paint engine did for you that you should know about
 
   viewer = new Viewer($('#viewer3d'));
   try {

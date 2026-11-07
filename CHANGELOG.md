@@ -2,6 +2,16 @@
 
 All notable changes to ClothingStudio. The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.1] – 2026-11-07
+
+### Fixed
+- **Text stayed editable only until you touched its layer.** Painting on the selected text layer with the Brush, then trying to edit the text,
+  did nothing, and so did moving or resizing it first. Now the Brush, Line, Rect and Oval paint on a layer of their own just above a text
+  layer (a note tells you), and the Move tool, its mouse wheel and the Resize tool (scale, turn, mirror, Fit / Fill) change the text's own
+  settings, so the text always stays editable and sharp. Only Erase, Fill, Merge and stretching one way only still turn text into pixels,
+  with a note; Undo brings the editable text back.
+- Text number boxes accept decimals (a text made 1.37 times bigger).
+
 ## [0.2.0] – 2026-11-06
 
 ### Added

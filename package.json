@@ -1,7 +1,7 @@
 {
   "name": "clothing-studio",
   "productName": "ClothingStudio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Paint GTA V / FiveM addon clothing textures with a live 3D preview, and manage the pieces of a clothing pack (add, move, delete, options, .ymt) in one desktop app.",
   "main": "main.js",
   "private": true,

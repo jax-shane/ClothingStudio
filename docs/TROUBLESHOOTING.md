@@ -29,8 +29,14 @@ Text size is in *texture pixels*, not screen pixels. A 2000 px texture shown at 
 
 **I can't retype my text any more.**
 Click it with the **Text** tool, or select its layer and press **Edit text layer**. If the layer has no blue **T**, it was turned into
-ordinary pixels by painting on it or resizing it; press **Undo** until the **T** is back, or just add the text again. A **locked**
+ordinary pixels. That only happens when you **erase** or **fill** on it, **merge** it with another layer, or stretch it **one way only**
+(width and height different) with the Resize tool; a note appears when it happens. Press **Undo** until the **T** is back, or just add
+the text again. Painting with the Brush, Line, Rect or Oval does *not* do this: that goes on its own layer above the text. A **locked**
 or **hidden** layer cannot be edited until you unlock / show it.
+
+**A "Paint over text" layer appeared.**
+That is on purpose: when a text layer is selected and you paint, the paint goes on a layer of its own so the text stays editable.
+Rename it, move it, or merge it into the text layer (then the text becomes pixels) as you like.
 
 **The font I want isn't in the list.**
 The list shows fonts installed on this PC. Type the exact name into the search box and press Enter, or press **Add font file…** and

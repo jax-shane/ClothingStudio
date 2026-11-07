@@ -100,8 +100,9 @@ text.
 words, the font, flip it, move it. If you delete all the words and place it, the layer is removed. **Undo** walks back
 through every edit.
 
-> If you paint on a text layer with the Brush, or resize it with the Resize tool, it turns into ordinary pixels
-> (the **T** disappears). Undo makes it text again.
+> You can paint over your text, move it, resize it, turn it and mirror it, and it **stays editable**. Brush strokes made while a
+> text layer is selected automatically go on their own layer just above it, so the words are never damaged. Only **Erase**,
+> **Fill**, **Merge** and stretching the text one way only turn it into ordinary pixels (the **T** disappears); **Undo** brings it back.
 
 ## 6. Save it into the pack
 

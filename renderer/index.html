@@ -77,7 +77,7 @@
       <div class="opt textbar" data-for="text" hidden>
         <div class="tg"><div class="tcap">Font</div><div class="trow">
           <button id="oFont" class="btn fontbtn" title="Pick the font. You can also type any font name that is installed on this PC."><span id="oFontName">Arial</span> <span class="caret">▾</span></button>
-          <input id="oFontSize" type="number" min="6" max="900" step="1" value="96" title="Text size in texture pixels"><span class="tunit">px</span>
+          <input id="oFontSize" type="number" min="6" max="2000" step="any" value="96" title="Text size in texture pixels"><span class="tunit">px</span>
         </div></div>
         <div class="tg"><div class="tcap">Style</div><div class="trow">
           <button id="oBold" class="tbtn" title="Bold"><b>B</b></button>
@@ -94,22 +94,22 @@
         <div class="tg"><div class="tcap">Mirror and turn</div><div class="trow">
           <button id="oFlipH" class="tbtn wide" title="Mirror the text left ↔ right, so it reads backwards">↔ Flip</button>
           <button id="oFlipV" class="tbtn wide" title="Mirror the text upside down">↕ Flip</button>
-          <label for="oAngle">Turn</label><input id="oAngle" type="number" min="-360" max="360" step="1" value="0" title="Turn the text by this many degrees"><span class="tunit">°</span>
+          <label for="oAngle">Turn</label><input id="oAngle" type="number" min="-360" max="360" step="any" value="0" title="Turn the text by this many degrees"><span class="tunit">°</span>
         </div></div>
         <div class="tg"><div class="tcap">Spacing</div><div class="trow">
-          <label for="oSpacing">Letters</label><input id="oSpacing" type="number" min="-50" max="300" step="1" value="0" title="Space between the letters, in pixels (can be negative)">
+          <label for="oSpacing">Letters</label><input id="oSpacing" type="number" min="-50" max="300" step="any" value="0" title="Space between the letters, in pixels (can be negative)">
           <label for="oLeading">Lines</label><input id="oLeading" type="number" min="50" max="400" step="5" value="120" title="Line height as a percentage of the text size"><span class="tunit">%</span>
         </div></div>
         <div class="tg"><div class="tcap">Outline</div><div class="trow">
-          <input id="oStroke" type="number" min="0" max="80" step="1" value="0" title="Outline thickness in pixels (0 = no outline)"><span class="tunit">px</span>
+          <input id="oStroke" type="number" min="0" max="80" step="any" value="0" title="Outline thickness in pixels (0 = no outline)"><span class="tunit">px</span>
           <input id="oStrokeColor" type="color" value="#ffffff" title="Outline colour">
         </div></div>
         <div class="tg"><div class="tcap">Shadow</div><div class="trow">
           <label class="chk" title="Switch the drop shadow on or off"><input id="oShadow" type="checkbox"> On</label>
           <input id="oShadowColor" type="color" value="#000000" title="Shadow colour">
-          <label for="oShadowBlur">Soft</label><input id="oShadowBlur" type="number" min="0" max="100" step="1" value="8" title="How soft the shadow edge is (pixels)">
-          <label for="oShadowX">Across</label><input id="oShadowX" type="number" min="-200" max="200" step="1" value="6" title="How far the shadow sits to the right (negative = left)">
-          <label for="oShadowY">Down</label><input id="oShadowY" type="number" min="-200" max="200" step="1" value="6" title="How far the shadow sits down (negative = up)">
+          <label for="oShadowBlur">Soft</label><input id="oShadowBlur" type="number" min="0" max="100" step="any" value="8" title="How soft the shadow edge is (pixels)">
+          <label for="oShadowX">Across</label><input id="oShadowX" type="number" min="-200" max="200" step="any" value="6" title="How far the shadow sits to the right (negative = left)">
+          <label for="oShadowY">Down</label><input id="oShadowY" type="number" min="-200" max="200" step="any" value="6" title="How far the shadow sits down (negative = up)">
         </div></div>
         <div class="tg tactions"><div class="tcap">&nbsp;</div><div class="trow">
           <button id="oFontFile" class="btn" title="Load a .ttf / .otf / .woff font file from your PC (it stays loaded until you close the app)">Add font file…</button><input id="oFontFileIn" type="file" accept=".ttf,.otf,.woff,.woff2" hidden>

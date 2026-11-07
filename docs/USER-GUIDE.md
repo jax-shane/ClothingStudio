@@ -118,7 +118,7 @@ Press `T`, **click** the texture and **type**. The text is drawn on the canvas e
 | Group | Control | What it does |
 |---|---|---|
 | **Font** | Font button | Opens the list of every font installed on your PC (each in its own face). Type to search; type any name and press Enter to use it. `↑ ↓` move, `Enter` picks, `Esc` closes |
-| | Size | Text size in texture pixels (6 – 900) |
+| | Size | Text size in texture pixels (6 – 2000) |
 | **Style** | **B** *I* <u>U</u> ~~S~~ **TT** | Bold, italic, underline, strikethrough, ALL CAPS |
 | **Align** | three buttons | Left / centre / right within the block, for several lines |
 | **Mirror and turn** | **↔ Flip** | Mirrors the text left-to-right, so it reads backwards (use it for parts of the model that are mirrored in the texture) |
@@ -147,9 +147,16 @@ Every change shows immediately, and the text box turns and mirrors with it so yo
   then place it again. One **Undo** goes back to the previous version.
 - Clearing all the words and placing removes the layer (Undo brings it back).
 - A **locked** or **hidden** text layer cannot be edited until you unlock / show it.
-- Painting on a text layer with a paint tool, or resizing it with the Resize tool, turns it into normal pixels: it keeps its
-  look but the **T** goes and it can no longer be retyped. Undo makes it live text again. Move live text with the **✥** handle
-  instead of the Move tool.
+- **Painting never costs you the text.** If a text layer is selected and you paint with the **Brush, Line, Rect or Oval**, your
+  painting goes on a layer of its own just above it (named *Paint over text*; a note tells you), so the words stay editable. Keep
+  painting and it keeps using that layer. To paint straight onto the text, merge the two layers.
+- **Move, Resize and the mouse wheel keep it editable too.** The **Move** tool, the **Resize** tool (corners, rotate knob, Flip,
+  Fit / Fill, the W / H and Angle boxes) and the wheel over the Move tool change the text's own settings (position, size, turn,
+  mirror), so the text stays live, sharp (it is painted again at the new size, never stretched) and retypable. The ✥ handle still
+  moves it while you edit.
+- **What does turn text into plain pixels:** **Erase**, **Fill**, **Merge** into the layer below (or merging something into the
+  text layer), and stretching it **one way only** (a width and height that differ). Text settings cannot say "wider but not taller".
+  The blue **T** goes and a note says so. **Undo** brings the editable text back.
 - Your last text settings (font, size, style …) are remembered for next time.
 
 ## The Resize tool
