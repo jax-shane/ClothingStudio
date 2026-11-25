@@ -53,6 +53,16 @@ const dev = {
     .map((n) => [n, async () => { throw new Error('This needs the desktop app (the browser test page is read-only).'); }])),
   ymtStatus: async () => null,
   ymtSync: async () => null,
+  // the language: the desktop app keeps it in settings.json (main.js); the browser test page in localStorage
+  getLanguage: async () => {
+    let saved = null;
+    try { saved = localStorage.getItem('cs.lang') || null; } catch { /* no storage */ }
+    return { saved, system: [...(navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || 'en'])] };
+  },
+  setLanguage: async (code, remember) => {
+    if (remember) { try { if (code) localStorage.setItem('cs.lang', code); else localStorage.removeItem('cs.lang'); } catch { /* no storage */ } }
+    return true;
+  },
   viewerOpen: async () => {
     const w = window.open('viewer-window.html', 'cs-viewer-window', 'popup,width=1000,height=800');
     return { reused: false, displays: 1, onOther: false, blocked: !w };
@@ -67,10 +77,10 @@ const dev = {
   scanPack: (p) => post('scan', { path: p }),
   loadMesh: (p) => post('mesh', { path: p }),
   loadTexture: (p) => post('texture', { path: p }),
-  saveTexture: (p, rgba) => {
+  saveTexture: (p, rgba, opts) => {
     let s = '';
     for (let i = 0; i < rgba.length; i += 0x8000) s += String.fromCharCode.apply(null, rgba.subarray(i, i + 0x8000));
-    return post('save', { path: p, rgba: btoa(s) });
+    return post('save', { path: p, rgba: btoa(s), width: opts && opts.width, height: opts && opts.height });
   },
   savePng: async (name, dataUrl) => { download(name, dataUrl); return name; },
   saveProject: async (name, json) => { download(name, URL.createObjectURL(new Blob([json]))); return name; },

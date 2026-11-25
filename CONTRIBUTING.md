@@ -25,7 +25,7 @@ git clone <your fork>
 cd ClothingStudio
 npm install
 npm start          # the app
-npm test           # 100+ tests, a few seconds, no game files needed
+npm test           # 200+ tests, a few seconds, no game files needed
 npm run dev        # the UI in a browser (read-only) at http://localhost:5173/renderer/index.html?pack=<folder>
 ```
 
@@ -40,6 +40,10 @@ Read [docs/TECHNICAL.md](docs/TECHNICAL.md) first; the source map and the safety
   must never read the real game, your own packs or the network.
 - **The UI** is plain HTML / CSS / JS, no framework or build step. Keep controls big and labelled, with a word and not only an icon; people
   should not need to hover to find out what a button does.
+- **Every text for the user goes through `t('English text')`** (`tn(n, 'one', 'other')` when it has a number, `{name}` for a value; `nt()` / `T()` in
+  `main.js`), and texts in the HTML pages are found by themselves. Never build a sentence from pieces (`'Deleted ' + n + ' files'`): translators
+  need the whole sentence. After adding or changing a text run `node tools/i18n.js extract`; `npm test` fails when `renderer/lang/en.js` is
+  out of date. See [docs/TRANSLATING.md](docs/TRANSLATING.md); the `?lang=pseudo` test language shows what is not translated and what does not fit.
 - **Smoke tests.** UI changes should be run in the packaged app with the hooks described in [TECHNICAL.md](docs/TECHNICAL.md#developer-hooks) on a
   *copy* of a pack. They edit the pack they are given.
 - **Licence.** The project is GPL-3.0-or-later. By contributing you agree your contribution is under the same licence. Do not paste code from

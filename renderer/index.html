@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>ClothingStudio</title>
+<title translate="no">ClothingStudio</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
@@ -12,7 +12,7 @@
 <body>
 <div id="app">
   <header id="topbar">
-    <div class="brand">Clothing<b>Studio</b></div>
+    <div class="brand" translate="no">Clothing<b>Studio</b></div>
     <button id="btnOpen" class="btn">Open pack…</button>
     <div id="packName" class="muted">Drop a clothing resource folder anywhere</div>
     <button id="ymtChip" class="ymt" hidden title="The pack's .ymt tells the game how many textures each piece has">.ymt</button>
@@ -26,6 +26,8 @@
     <button id="btnProjSave" class="btn ghost" title="Save layers so you can keep editing later">Save layers…</button>
     <button id="btnExport" class="btn">Export PNG</button>
     <button id="btnSave" class="btn accent" title="Write the painting into the .ytd (a .bak backup is kept)">Save to YTD</button>
+    <button id="btnKeys" class="btn ghost" title="Keyboard shortcuts (F1)">⌨</button>
+    <button id="btnLang" class="btn ghost" title="Language" translate="no">🌐 EN</button>
   </header>
 
   <aside id="left">
@@ -38,7 +40,7 @@
         </span>
       </h3>
       <div class="treefilter"><input id="treeFilter" type="search" placeholder="Filter pieces…" spellcheck="false" autocomplete="off"></div>
-      <div id="tree" class="scroll"><p class="hint">Open or drop a resource folder such as <code>js_gsp</code>. Male and female pieces appear here.</p></div>
+      <div id="tree" class="scroll"><p class="hint" translate="no">Open or drop a resource folder such as <code>js_gsp</code>. Male and female pieces appear here.</p></div>
     </section>
     <section class="panel layers">
       <h3>Layers <span id="lCount" class="lcount"></span><span class="lhint">top of the list = in front</span></h3>
@@ -76,7 +78,7 @@
       <label class="opt chk"><input id="oSym" type="checkbox"> Mirror</label>
       <div class="opt textbar" data-for="text" hidden>
         <div class="tg"><div class="tcap">Font</div><div class="trow">
-          <button id="oFont" class="btn fontbtn" title="Pick the font. You can also type any font name that is installed on this PC."><span id="oFontName">Arial</span> <span class="caret">▾</span></button>
+          <button id="oFont" class="btn fontbtn" title="Pick the font. You can also type any font name that is installed on this PC."><span id="oFontName" translate="no">Arial</span> <span class="caret">▾</span></button>
           <input id="oFontSize" type="number" min="6" max="2000" step="any" value="96" title="Text size in texture pixels"><span class="tunit">px</span>
         </div></div>
         <div class="tg"><div class="tcap">Style</div><div class="trow">

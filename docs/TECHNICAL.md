@@ -3,7 +3,7 @@
 How ClothingStudio works inside. Written for people who want to fix a bug, add a feature, or just trust what the app does to their files.
 
 **Contents:** [Overview](#overview) · [Source map](#source-map) · [File formats](#file-formats) · [Safety design](#safety-design) ·
-[The paint engine](#the-paint-engine) · [Live text](#live-text) · [The 3D view](#the-3d-view-1) · [Tests](#tests) ·
+[The paint engine](#the-paint-engine) · [Live text](#live-text) · [The 3D view](#the-3d-view-1) · [Languages](#languages) · [Tests](#tests) ·
 [Running, building, packaging](#running-building-packaging) · [Developer hooks](#developer-hooks) · [Limits](#limits-and-ideas)
 
 ---
@@ -32,9 +32,9 @@ testable from plain Node (`npm test`). `main.js` only wires dialogs and IPC to t
 
 | Path | What it does |
 |---|---|
-| `main.js`, `preload.js` | Electron shell: window, file dialogs, IPC, pop-out window, developer smoke-test hooks |
+| `main.js`, `preload.js` | Electron shell: window (no application menu, so the page owns every key), file dialogs, IPC, pop-out window, developer smoke-test hooks |
 | `src/lib/rsc.js` | RSC7 resource container: 16-byte header + raw-deflate; system / graphics segments and pointers |
-| `src/lib/ytd.js` | Texture dictionary: read, decode (DXT1 / DXT5 / A8R8G8B8), mip chains, encode, **patch pixels back into the original file** |
+| `src/lib/ytd.js` | Texture dictionary: read, decode (DXT1 / DXT5 / A8R8G8B8), mip chains, encode, **patch pixels back into the original file**, or **write them at a new size** (`resizeTexture`) |
 | `src/lib/ydd.js` | Drawable dictionary reader: positions, normals, UVs, indices |
 | `src/lib/ymt.js` + `ymt_types.json` | `CPedVariationInfo` ped-variation `.ymt` (a "Meta" resource): read, normalise, write byte-compatibly; insert / remove / move drawables; options |
 | `src/lib/rbf.js` | RBF0 binary XML, used by the creature metadata file |
@@ -42,11 +42,19 @@ testable from plain Node (`npm test`). `main.js` only wires dialogs and IPC to t
 | `src/lib/options.js` | audio / flag / render-flag lists of the Options dialog |
 | `src/lib/pack.js` | scans a resource folder into gender → category → piece → texture letters |
 | `src/lib/packops.js` | **pack operations**: add / move / delete pieces, add textures, piece options, new pack, build resource, journal, recovery |
+| `src/lib/lastdirs.js` | which folder each file dialog opens in (the one it was last used in; kept in `settings.json` as `lastDirs`) |
+| `src/lib/rpfwrite.js` | writes unencrypted RPF7 archives (`writeRpf`): table, names, resources and nested archives |
+| `src/lib/spbuild.js` | **Build → Single player**: the FiveM resource converted into `dlc.rpf` (content.xml, setup2.xml, metadata, `x64\models\cdimages` archives) and its install text |
 | `src/lib/rpf.js`, `gtakeys.js`, `body.js`, `body-worker.js`, `skeleton.js` | the optional mannequin: reads the user's own GTA V archives |
-| `renderer/js/paint.js` | the paint engine (layers, tools, undo, transforms, live text) |
+| `renderer/js/paint.js` | the paint engine (layers, tools, undo, transforms, live text, changing a document's resolution) |
+| `renderer/js/texsize.js` | which bigger texture sizes the "this image is bigger than the texture" questions offer (pure functions) |
 | `renderer/js/app.js` | the UI: Pack list, layers panel, options bar, colour wheel, text editor, dialogs |
 | `renderer/js/viewer.js` | three.js scene, orbit camera, live texture, mannequin, pop-out sync |
-| `renderer/js/pieces.js` | the *Add pieces* and *Options* dialogs |
+| `renderer/js/pieces.js` | the *Add pieces* and *Options* dialogs, the names of the categories |
+| `renderer/js/i18n.js` | the interface languages: `t()` / `tn()`, plural rules, which language to start in, translating the static text of a page |
+| `renderer/js/keys.js` | how a key press is spelled for the shortcut table in `app.js` (`Ctrl+Shift+S`, AltGr, shifted brackets, number keys by position) |
+| `renderer/lang/*.js` | one file per language (`export default { name, dir, strings }`); `en.js` is generated; see [Translating](TRANSLATING.md) |
+| `tools/i18n.js` | the translation tooling: finds every text in the code (`extract`), checks a language file (`check`), lists what is missing (`missing`), makes the test language (`pseudo`) |
 | `dev-server.js` | optional: serves the UI in a normal browser for testing (read-only unless started with `--allow-write`) |
 | `test/` | the automated tests (`node:test`, no dependencies) |
 
@@ -61,6 +69,23 @@ All of this is re-implemented in JavaScript from the layouts documented by [Code
   pixels and mip chain back into the *original file's* structure (size, format and every header field untouched), then **re-reads and
   verifies** the result before it replaces the file. DXT1 is encoded with an alpha-aware block fitter (on/off transparency is
   verified); DXT5 keeps smooth alpha; A8R8G8B8 is lossless.
+- **Changing a texture's size** (`ytd.resizeTexture`). The size is in the file, so this builds a new inflated image instead of patching:
+  the system segment byte for byte as it was except this texture's header (width, height, stride scaled with the width, mip count),
+  followed by one graphics page that holds the new mip chain. The page is laid out like the one in the bundled template: the smallest
+  power-of-two page that fits (`0x2000 << shift`, so 1 MiB for 1024², 4 MiB for 2048², 16 MiB for 4096²), flagged as "one page of 16 base
+  pages" with base `0x200 << shift` (`0xD0020007` for 1024², `…09` for 2048², `…0B` for 4096²), padded with the `0xCD` fill real files use,
+  and the version bits (top 4) of the old flags are kept. The mip count keeps the file's habit (the template stops at 4×4, so 1024² has 9
+  levels and 4096² has 11). Only single-texture dictionaries change size; sides must be powers of two from 4 to 4096 (`MAX_RESIZE`).
+  It uses the same safety net as `patchTexture`: `.bak` once, write to `.tmp`, read the new file back (name, format, size, mips, segment
+  sizes, pixels) and only then replace the old one. Going back to 1024² reproduces the template's header and flags exactly (a test).
+- **RPF7 (writing)** (`rpfwrite.js`): the archive of GTA V. Header (`RPF7`, entry count, names length, encryption flag `0x4F50454E` = "OPEN"),
+  then the entry table (16 bytes each), the names table, and the data in 512-byte blocks. Directory entry: `[name offset u32][0x7FFFFF00][first
+  entry][count]`; binary file: `name offset (16 bits) | size (24 bits)…`, block, uncompressed size, compressed size; resource: `[name offset
+  u16][size u24][block | 0x800000][system flags][graphics flags]` with the version nibbles of the flags carrying the RSC7 version, size
+  `0xFFFFFF` as the marker for 16 MiB and more. Entries are in depth-first order with the children of a folder sorted, as in the game's own
+  archives. It was validated against about 2 500 files of the game by reading, rewriting and reading again; the tests use stand-in files.
+  A nested `.rpf` must itself be the output of this writer (a multiple of 512 bytes), so it can be copied in untouched. Limits: a name offset
+  is 16 bits, so very large packs have to be split (the error says so).
 - **YMT (ped variation)**: a "Meta" resource: blocks per structure type; arrays are `(block id in the low 12 bits, offset << 12)` pointers.
   Root 0x70 bytes, component 0x18, drawable 0x30, texture 3, component-info 0x30, prop 0x38, prop texture 0xc, anchor 0x18. The writer
   reproduces the layout of grzyClothTool / CodeWalker files so that an **unchanged file comes out byte-for-byte identical** (header 0x90,
@@ -96,8 +121,17 @@ The promise is "no file is lost and no pack is left half changed". How:
 
 - A **document** has a list of layers (each its own canvas with `visible`, `opacity`, `blend`, `locked`), the active index, an undo and a
   redo stack, and an optional guide image.
-- **Undo** has two entry kinds: `px` (the pixels of one layer, plus that layer's live-text settings) and `st` (a snapshot of the whole layer
-  list, for add / delete / merge / move). Snapshots are capped by a memory budget per document.
+- **Undo** has three entry kinds: `px` (the pixels of one layer, plus that layer's live-text settings), `st` (a snapshot of the whole layer
+  list, for add / delete / merge / move) and `rs` (the layers *and the size* from before a change of resolution). Snapshots are capped by a
+  memory budget per document, and never more than about 1 GB however many layers there are.
+- **Resolution.** `Paint.resizeDoc(w, h)` resamples every layer to the new size (live text is painted again at the new size, so it stays sharp
+  and editable, unless its size would leave 6 - 2000), is one `rs` undo step, and emits `resize`; `app.js` then redraws the UV lines, swaps
+  the 3D copy if needed, refits the view and shows "resized from … , not saved yet" until **Save to YTD** writes the file at the new size
+  (`tex:save` with `width` / `height` → `ytd.resizeTexture`). Entries below an `rs` marker are the old size, entries above it the new one, so
+  undoing past it restores the old layers and size, and a pixel snapshot is never applied at the wrong size.
+- **"Bigger than the texture" questions** (`texsize.js`): *Import image*, drop or paste, *Open layers…* (a project saved at a bigger size) and the
+  Add textures / Add pieces flows ask whether to keep the texture's size or make it bigger, but only when the image is bigger than the texture in
+  both directions. Sizes offered: the texture's own size doubled up to 4096; "keep" is the default.
 - Brush strokes are built on a separate stroke canvas and composited with the layer's opacity, so soft brushes do not stack unevenly.
 - The **Resize** tool keeps the layer's original pixels and re-renders from them on every change, so scaling up and down never accumulates
   blur, and bakes the result as one undo step on Apply.
@@ -153,10 +187,17 @@ packs from the blank texture template in `src/lib/assets/`, with stand-in `.ydd`
 |---|---|
 | `rbf-creature.test.js` | RBF round trip; the creature-metadata rules |
 | `ymt.test.js` | model creation, insert / remove / move, options, write / read, byte-identical rebuild, compare / sync |
-| `ytd.test.js` | reading the template, formats, patch round-trip, `.bak`, DXT1 alpha verification |
+| `ytd.test.js` | reading the template, formats, patch round-trip, `.bak`, DXT1 alpha verification; changing a texture's size (page layout, only the header changes, every format, refusals) |
 | `pack.test.js` | name parsing, scanning, empty new pack |
-| `packops-pieces.test.js` | create pack, add / move / delete pieces and textures, options, skin renaming, rollback |
+| `packops-pieces.test.js` | create pack, add / move / delete pieces and textures (also at another size than the pack's), options, skin renaming, rollback |
+| `lastdirs.test.js` | file dialogs reopening in the folder they were last used in |
+| `texsize.test.js` | which bigger texture sizes the import questions offer |
 | `packops-recovery-build.test.js` | kills a child process mid-operation then checks recovery restores the pack byte for byte; **Build** output |
+| `rpfwrite.test.js` | the RPF7 writer: layout, order, resources and nested archives, refusals; read back by `rpf.js` |
+| `spbuild.test.js` | **Build → Single player**: `content.xml` / `setup2.xml`, which files are registered, textures and flags that survive, heels in the creature archive, refusals, no leftovers |
+| `i18n.test.js` | `t()` / `tn()` and plural rules, the start language, the catalog (it must be up to date), every language file against the checker |
+| `keys.test.js` | reading key presses for the shortcuts: modifiers, named keys, Shift and AltGr on other keyboard layouts, number keys by position |
+| `main-ipc.test.js` | `main.js` with a fake Electron: remembered folders, texture sizes, copying a texture to another piece, **Build** for FiveM and for single player, the language of dialogs and errors |
 
 The renderer is checked by packaged-app smoke tests (below), not by `npm test`.
 
@@ -178,11 +219,30 @@ For self-tests of the packaged app, `main.js` has hooks that **edit the pack the
 are set: `CS_SMOKE_OUT=<png path>`, `CS_SMOKE_PACK=<pack copy>`, `CS_SMOKE_ALLOW=yes`. `CS_SMOKE_MODE` selects `ops` (piece operations
 through the real UI functions), `text` (the Text tool and the Layers buttons), or `shots` (screenshots for the documentation); with none it
 paints, saves, re-reads and adds / deletes textures. `CS_SMOKE_POP=1` also opens and captures the 3D pop-out. **Always point them at a copy.**
+They run in English whatever the language of the PC (the smoke tests look for English texts).
+
+## Languages
+
+Every text for the user is written in English in the code and goes through `t('English')`; the English text is the key, so a language
+that lacks a text simply shows the English. `tn(n, 'one', 'other')` is for texts with a number and picks the form with `Intl.PluralRules`
+(`{ one, few, many, other }` in a language file); `{name}` marks a value. Static text in `index.html` is translated by `applyStatic`,
+which walks the text nodes and the `title` / `placeholder` / `aria-label` / `alt` attributes once per language change and remembers the English,
+so switching language translates from the English again (text the program changed in the meantime is left alone); `translate="no"` keeps
+the product name and font names out. The paint engine writes its messages in English and `app.js` translates them (`Paint.translate`);
+lists of texts in tables are marked `N_('…')` and translated where they are shown. Dialogs and error messages of `main.js` use `nt()` /
+`T()`, which read the language file of the language the page tells it about (`lang:get` / `lang:set`; the choice is saved in
+`settings.json` only when the user made it). Messages that come from the file-format code in `src/lib` stay English.
+`node tools/i18n.js extract` finds every text (comments are ignored) and writes `renderer/lang/en.js` with a note on where each one is
+used; `npm test` fails when that file is out of date or a language file is wrong. Arabic and Hebrew set `dir: 'rtl'`; the layout is
+not mirrored, only the words (`unicode-bidi: plaintext`).
 
 ## Limits and ideas
 
-- Not handled: splitting packs of more than 128 pieces; *replace*, *singleplayer* and AltV layouts; editing `.meta` files; editing models.
-- Textures keep their original size and format; changing them needs a new `.ytd` through *Add textures*.
+- Not handled: splitting packs of more than 128 pieces; the *replace* and AltV layouts; opening an existing `dlc.rpf` as a pack (Build can
+  only write one); editing `.meta` files; editing models. The single-player pack **Build** writes was not tried in game.
+- Textures keep their format. Their size can be changed (2×, 4× … up to 4096×4096, one texture at a time, single-texture `.ytd` files) but not
+  chosen freely: powers of two only. How the game treats very large clothing textures was checked by structure (the page layout of the
+  bundled template, read-back verification), not in game.
 - The mannequin needs the **legacy** GTA V edition (the Enhanced edition uses different keys).
 - Ideas: curved (arc) text, gradient fills, a library of saved logos, drag-to-reorder pieces, a Mac / Linux build.
 

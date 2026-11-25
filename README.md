@@ -17,7 +17,8 @@
 Open an addon clothing resource (a folder with `stream/`, `.meta` files and `fxmanifest.lua`), pick a hat, top, pair of
 pants or badge, **paint on its texture while the 3D model updates as you go**, and press **Save to YTD**. It also does the
 boring parts of running a clothing pack: adding, moving and deleting pieces without breaking the numbering, adding more
-textures (`a`, `b`, `c` …), keeping the pack's `.ymt` right, and building a clean FiveM resource.
+textures (`a`, `b`, `c` …), keeping the pack's `.ymt` right, and building a clean FiveM resource **or a single-player DLC pack**.
+It speaks **11 languages**.
 
 > No more exporting a texture, editing it in another program, importing it back, and loading the game to see what it
 > looks like.
@@ -36,7 +37,9 @@ textures (`a`, `b`, `c` …), keeping the pack's `.ymt` right, and building a cl
 | <img src="docs/images/resize-tool.png" alt="The Resize tool" width="520"> | **Resize tool.** Move, scale, rotate and flip any layer, with handles *and* exact numbers, plus Fit / Fill / Stretch. Drop in a logo, size it, done. |
 
 Also: brush with hardness and pressure, eraser, fill, colour picker, line, rectangle, oval, mirror painting, move layer,
-zoom and pan, undo / redo, export PNG, save your layers to a file and carry on later, paste or drop images in.
+zoom and pan, undo / redo, export PNG, save your layers to a file and carry on later, paste or drop images in. **Keyboard
+shortcuts** for nearly everything, Photoshop-style (brush size and opacity, layers, zoom, next texture / next piece …): press
+`F1` to see them all.
 
 ### See it on the model, live
 
@@ -52,12 +55,27 @@ can see exactly what you are painting.
 | | |
 |---|---|
 | <img src="docs/images/pack-list.png" alt="The Pack list" width="260"> | **Pack list.** Male and Female, grouped by category, with a filter box and a **⋯** menu on every piece. |
-| <img src="docs/images/piece-menu.png" alt="The piece menu" width="300"> | **Move, swap, delete, add textures.** Move *Top 002* up and it swaps with *Top 001* (model and every texture renamed together). Delete *Top 001* and *Top 002* becomes *Top 001*. Everything the game stores by number (the `.ymt`) follows. Deleted files go to the **Recycle Bin**. |
-| <img src="docs/images/add-pieces.png" alt="Adding pieces" width="420"> | **Add pieces.** Drop `.ydd` models in. If a name does not say what it is (say `chest_badge.ydd`) the app asks: badge, hat, pants …, male or female, shows skin or not. Add textures from PNG / JPG / WEBP or ready-made `.ytd` files. |
+| <img src="docs/images/piece-menu.png" alt="The piece menu" width="300"> | **Move, swap, delete, add textures.** Move *Top 002* up and it swaps with *Top 001* (model and every texture renamed together). Delete *Top 001* and *Top 002* becomes *Top 001*. Everything the game stores by number (the `.ymt`) follows. Deleted files go to the **Recycle Bin**. **Copy a texture to other pieces** in one go (`Ctrl+D`): each gets it as its next letter. |
+| <img src="docs/images/add-pieces.png" alt="Adding pieces" width="420"> | **Add pieces.** Drop `.ydd` models in. If a name does not say what it is (say `chest_badge.ydd`) the app asks: badge, hat, pants …, male or female, shows skin or not. Add textures from PNG / JPG / WEBP or ready-made `.ytd` files; an image bigger than the pack's textures asks whether the new texture should be bigger too (up to 4096×4096). |
 | <img src="docs/images/options-dialog.png" alt="Piece options" width="420"> | **Piece options** like grzyClothTool's *Drawable Options*: audio, flags, render flag, **hair scale** for hats, **high heels** for shoes, shows skin. The `.ymt` and the creature metadata file are kept right for you. |
 | <img src="docs/images/ymt-check.png" alt="The .ymt check" width="420"> | **The `.ymt` is kept in step.** The top bar tells you if the `.ymt` matches your files, and one click fixes it. The original is saved once as `.bak`. |
 
-**New** makes an empty pack, **Build** writes a clean FiveM resource you can drop into your server's `resources` folder.
+**New** makes an empty pack, **Build** writes a clean FiveM resource you can drop into your server's `resources` folder, or a
+**single-player DLC pack** (`dlc.rpf`) for story mode.
+
+### In your language
+
+The whole program (buttons, tips, questions, messages, the 3D pop-out, the file dialogs) is available in **11 languages**: English,
+Español, Português (Brasil), Français, Deutsch, Русский, Türkçe, Polski, Italiano, Nederlands and العربية.
+It starts in the language of your PC; the **🌐** button at the top right changes it on the spot. The translations were made with
+machine translation and not yet checked by native speakers: a text that is not translated shows in English, and fixing or adding a language is
+a small text file, see **[Translating](docs/TRANSLATING.md)**.
+
+### Single player as well
+
+**Build → Single player (dlc.rpf)** writes your pack as a DLC pack for story mode, with the install steps. It follows the layout of the game's
+own clothing DLCs and the archive is read back and checked, but it has **not been tried in game yet**; see
+[the guide](docs/USER-GUIDE.md#new-pack-and-build).
 
 ### Built to not lose your work
 
@@ -67,7 +85,7 @@ can see exactly what you are painting.
   the next time you open the pack.
 - New `.ymt` files are re-read and checked before they replace the old one; ones the app does not fully understand are
   left alone and reported.
-- 100+ automated tests cover the file formats and every pack operation (`npm test`, no game files needed).
+- 200+ automated tests cover the file formats, every pack operation, the single-player archive writer and the translations (`npm test`, no game files needed).
 
 ---
 
@@ -107,6 +125,7 @@ adding a piece and building the resource.
 | **[User guide](docs/USER-GUIDE.md)** | Every tool, button and shortcut, explained |
 | **[Pack format](docs/PACK-FORMAT.md)** | How a clothing pack is organised: file names, `.ymt`, creature metadata, what each option does |
 | **[Troubleshooting](docs/TROUBLESHOOTING.md)** | "It says…", "I can't…", "The game shows…" |
+| **[Translating](docs/TRANSLATING.md)** | Fix or add a language: the file format, the rules, the checker |
 | **[Technical notes](docs/TECHNICAL.md)** | How it works inside: file formats, safety design, tests, building |
 | [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Notices & credits](NOTICE.md) | |
 
@@ -116,10 +135,15 @@ adding a piece and building the resource.
 
 - **Verified by decoding, re-encoding and re-reading real packs, not by loading them in GTA V.** Keep the `.bak` files
   until you have looked at the result in game.
-- Textures are written back at their original size and format (DXT1, DXT5 or A8R8G8B8, mips regenerated). DXT is
-  compressed, so very smooth photographic gradients can band slightly; logos and flat art look great.
+- Textures are written back in their original format (DXT1, DXT5 or A8R8G8B8, mips regenerated) and size, unless you choose to
+  make a texture bigger when you bring in a bigger image (2×, 4× … up to 4096×4096). DXT is compressed, so very smooth
+  photographic gradients can band slightly; logos and flat art look great.
 - ClothingStudio edits textures and the pack's bookkeeping files. It does not edit the 3D models themselves.
-- Splitting packs of more than 128 pieces, and the *replace* / *singleplayer* / AltV layouts, are not done yet.
+- Splitting packs of more than 128 pieces, and the *replace* / AltV layouts, are not done yet. The **single-player** DLC pack is built from
+  the layout of the game's own DLCs and verified by reading the archive back, **not by loading it in the game**; keep a backup of your
+  game files. Opening an existing `dlc.rpf` to edit it is not possible yet (Build only writes one).
+- The translations are machine-made. Messages that come from the file-format code (the part after the colon in "Could not add the
+  textures: …") are in English.
 - The mannequin needs the **legacy** GTA V edition installed; everything else works without any game installed.
 
 ## Credits and legal

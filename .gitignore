@@ -19,6 +19,9 @@ desktop.ini
 *.log
 npm-debug.log*
 
+# the test language that tools/i18n.js pseudo makes
+renderer/lang/pseudo.js
+
 # local scratch
 scratch/
 tmp/

@@ -13,6 +13,7 @@ const path = require('path');
 const P = require('../src/lib/packops');
 const Y = require('../src/lib/ymt');
 const C = require('../src/lib/creature');
+const ytd = require('../src/lib/ytd');
 const { scanPack } = require('../src/lib/pack');
 const H = require('./helpers');
 const { tex, add, item, names, tree, snapshot, ymtOf, texCounts, makeBin, makePack, markerOf, colourOf, sameColour, RED, GREEN, BLUE, YELLOW } = H;
@@ -179,6 +180,69 @@ describe('adding textures to a piece', () => {
     fs.writeFileSync(junk, 'nope');
     const before = snapshot(root);
     assert.throws(() => P.addTextures(root, 'male_jbib_000', [tex(GREEN), { kind: 'ytd', path: junk }]), /RSC7/);
+    assert.deepEqual(snapshot(root), before);
+  });
+});
+
+describe('textures of another size than the rest of the pack', () => {
+  /** an image the way the app sends it: { kind: 'png', rgba, width, height }, plus resize: true when the user chose to give the texture that size */
+  const png = (w, h, [r, g, b], resize = false) => {
+    const rgba = Buffer.alloc(w * h * 4);
+    for (let i = 0; i < rgba.length; i += 4) { rgba[i] = r; rgba[i + 1] = g; rgba[i + 2] = b; rgba[i + 3] = 255; }
+    return { kind: 'png', rgba, width: w, height: h, ...(resize ? { resize: true } : {}) };
+  };
+  const dims = (file) => { const t = ytd.readYtd(file).textures[0]; return [t.width, t.height, t.mips]; };
+
+  it('a new piece can have a 2048 x 2048 texture next to a normal one; the .ymt counts both', () => {
+    const root = makePack();
+    add(root, { textures: [png(2048, 2048, RED, true), tex(GREEN)] });
+    assert.deepEqual(dims(ytdF(root, 0, 'a')), [2048, 2048, 10]);
+    assert.deepEqual(dims(ytdF(root, 0, 'b')), [1024, 1024, 9], 'the other texture keeps the size of the pack');
+    assert.ok(sameColour(colourOf(ytdF(root, 0, 'a')), RED));
+    assert.deepEqual(texCounts(root, JBIB), [2]);
+    assert.equal(ymtProblems(root), 0);
+  });
+
+  it('textures added to an existing piece can be bigger too, and then take the size of the piece\'s own first texture', () => {
+    const root = makePack();
+    add(root, { textures: [tex(RED)] });
+    P.addTextures(root, 'male_jbib_000', [png(2048, 2048, GREEN, true)]);
+    assert.deepEqual(dims(ytdF(root, 0, 'b')), [2048, 2048, 10]);
+    assert.ok(sameColour(colourOf(ytdF(root, 0, 'b')), GREEN));
+    assert.equal(P.findTemplate(scanPack(root), 'male', false, 'jbib', item(root, 'male_jbib_000')).width, 1024, 'a piece\'s own first texture is the template');
+
+    const root2 = makePack();
+    add(root2, { textures: [png(2048, 2048, RED, true)] });
+    const tpl = P.findTemplate(scanPack(root2), 'male', false, 'jbib', null);
+    assert.deepEqual([tpl.width, tpl.height], [2048, 2048], 'the next piece of that slot starts from 2048 as well');
+    P.addTextures(root2, 'male_jbib_000', [png(2048, 2048, BLUE)]);       // so a plain 2048 image needs no resize flag now
+    assert.deepEqual(dims(ytdF(root2, 0, 'b')), [2048, 2048, 10]);
+  });
+
+  it('without resize: true an image of another size is still refused (the app asks the user first)', () => {
+    const root = makePack();
+    add(root, { textures: [tex(RED)] });
+    const before = snapshot(root);
+    assert.throws(() => P.addTextures(root, 'male_jbib_000', [png(2048, 2048, GREEN)]), /must be 1024.1024 pixels/);
+    assert.deepEqual(snapshot(root), before);
+  });
+
+  it('a size the game cannot use undoes the whole piece, and the files already written', () => {
+    const root = makePack();
+    add(root, { marker: 'keep' });
+    const before = snapshot(root);
+    assert.throws(() => add(root, { textures: [tex(RED), png(100, 100, GREEN, true)] }), /power of two wide and high/);
+    assert.throws(() => add(root, { textures: [tex(RED), png(8192, 8192, GREEN, true)] }), /power of two wide and high/);
+    assert.deepEqual(snapshot(root), before);
+    assert.equal(fs.existsSync(path.join(root, '.cs_journal.json')), false, 'no journal left behind');
+  });
+
+  it('pixel data that does not match the size it claims is refused', () => {
+    const root = makePack();
+    add(root, { textures: [tex(RED)] });
+    const before = snapshot(root);
+    const lie = { ...png(512, 512, GREEN, true), width: 2048, height: 2048 };
+    assert.throws(() => P.addTextures(root, 'male_jbib_000', [lie]), /must be 2048.2048 pixels/);
     assert.deepEqual(snapshot(root), before);
   });
 });

@@ -2,6 +2,7 @@
 // ('state') and the live texture pixels ('tex') over api.viewerSend / api.onViewerMessage.
 import { api } from './api.js';
 import { Viewer } from './viewer.js';
+import { t, startLanguage, showLanguage } from './i18n.js';
 
 const $ = (s) => document.querySelector(s);
 const viewer = new Viewer($('#stage'));
@@ -40,6 +41,8 @@ function onMessage(m) {
     const px = new Uint8ClampedArray(m.rgba.buffer, m.rgba.byteOffset, m.rgba.byteLength);
     texCanvas.getContext('2d').putImageData(new ImageData(px, m.width, m.height), 0, 0);
     viewer.refresh();
+  } else if (m.type === 'lang') {                  // the editor switched language
+    showLanguage(m.code).then(() => { document.title = t('ClothingStudio - 3D view'); $('#pFull').textContent = isFull ? t('Exit full screen') : t('Full screen'); });
   } else if (m.type === 'close') {
     window.close();
   }
@@ -51,7 +54,7 @@ function setFull(on) {
   api.setFullscreen(isFull).catch(() => { /* ignore */ });
   if (isFull && !window.api) document.documentElement.requestFullscreen().catch(() => { /* browser harness only */ });
   $('#pFull').classList.toggle('on', isFull);
-  $('#pFull').textContent = isFull ? 'Exit full screen' : 'Full screen';
+  $('#pFull').textContent = isFull ? t('Exit full screen') : t('Full screen');
 }
 const toggleFullscreen = () => setFull(!isFull);
 
@@ -83,4 +86,4 @@ window.addEventListener('pagehide', () => api.viewerSend({ type: 'closed' }));
 
 window.__pop = { viewer, tex: () => texCanvas };   // debug handle used by the smoke test
 api.onViewerMessage(onMessage);
-api.viewerSend({ type: 'ready' });   // the editor answers with the current scene
+startLanguage(api).finally(() => { document.title = t('ClothingStudio - 3D view'); api.viewerSend({ type: 'ready' }); });   // the editor answers with the current scene
