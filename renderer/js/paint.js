@@ -12,11 +12,18 @@
 
   const MAX_UNDO = 25;
   const UNDO_BUDGET = 320 * 1024 * 1024; // bytes of snapshots kept per document
+  // The blend modes, in Photoshop's order and groups (null: a divider in the list). The values are the canvas' own
+  // globalCompositeOperation names; 'lighter' adds the colours, which is Photoshop's Linear dodge (add).
   const BLENDS = [
-    ['source-over', N_('Normal')], ['multiply', N_('Multiply')], ['screen', N_('Screen')],
-    ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['darken', N_('Darken')], ['lighten', N_('Lighten')],
+    ['source-over', N_('Normal')], null,
+    ['darken', N_('Darken')], ['multiply', N_('Multiply')], ['color-burn', N_('Colour burn')], null,
+    ['lighten', N_('Lighten')], ['screen', N_('Screen')], ['color-dodge', N_('Colour dodge')], ['lighter', N_('Linear dodge (add)')], null,
+    ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['hard-light', N_('Hard light')], null,
+    ['difference', N_('Difference')], ['exclusion', N_('Exclusion')], null,
+    ['hue', N_('Hue')], ['saturation', N_('Saturation')], ['color', N_('Colour')], ['luminosity', N_('Luminosity')],
   ];
 
+  const BLEND_OK = new Set(BLENDS.filter(Boolean).map(([v]) => v));
   const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
   const ctxOf = (c) => c.getContext('2d', { willReadFrequently: true });
   const hexRgb = (hex) => { const n = parseInt(hex.replace('#', ''), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
@@ -31,6 +38,7 @@
       this.visible = true;
       this.opacity = 1;
       this.blend = 'source-over';
+      this.clip = false;     // clipping mask: shown only where the nearest unclipped layer below it has pixels (Photoshop's "clip to the layer below")
       this.locked = false;   // a locked layer cannot be painted on, moved, resized, merged or deleted
       this.text = null;      // live text: the settings the layer's text was painted with, so it can be edited again (cleared as soon as the pixels are changed any other way)
       this.editing = false;  // the text editor has this layer open: it is not drawn meanwhile (the editor shows a preview instead)
@@ -39,7 +47,7 @@
     clone() {
       const l = new Layer(this.canvas.width, this.canvas.height, this.name);
       l.ctx.drawImage(this.canvas, 0, 0);
-      l.visible = this.visible; l.opacity = this.opacity; l.blend = this.blend; l.locked = this.locked;
+      l.visible = this.visible; l.opacity = this.opacity; l.blend = this.blend; l.clip = this.clip; l.locked = this.locked;
       l.text = this.text ? JSON.parse(JSON.stringify(this.text)) : null;
       return l;
     }
@@ -66,6 +74,7 @@
       tolerance: 24, fill: false,
     },
     handlers: {},
+    preview: null,                       // see setPreview
     BLENDS,
     translate: (s, p) => (p ? s.replace(/\{(\w+)\}/g, (m, k) => (k in p ? p[k] : m)) : s),
   };
@@ -94,18 +103,59 @@
   const layer = () => E.doc.layers[E.doc.active];
 
   // ---------------------------------------------------------------- render
+  let scratch = null;                                    // a document-sized canvas: a clipped layer is masked here before it is blended in
+  function scratchFor(d) {
+    if (!scratch) scratch = mk(d.w, d.h);
+    if (scratch.width !== d.w || scratch.height !== d.h) { scratch.width = d.w; scratch.height = d.h; }
+    const sg = scratch.getContext('2d');
+    sg.setTransform(1, 0, 0, 1, 0, 0); sg.globalAlpha = 1; sg.globalCompositeOperation = 'source-over';
+    sg.clearRect(0, 0, d.w, d.h);
+    return scratch;
+  }
+  /** `pixels` (a canvas) cut to where `mask` (a canvas) has pixels, on the scratch canvas. */
+  function clippedTo(d, pixels, mask, extra, extraAlpha) {
+    const s = scratchFor(d), sg = s.getContext('2d');
+    sg.drawImage(pixels, 0, 0);
+    if (extra) { sg.globalAlpha = extraAlpha; sg.drawImage(extra, 0, 0); sg.globalAlpha = 1; }
+    sg.globalCompositeOperation = 'destination-in';
+    sg.drawImage(mask, 0, 0);
+    sg.globalCompositeOperation = 'source-over';
+    return s;
+  }
+
+  /**
+   * The layers as one picture, bottom up, each with its opacity and blend mode. A clipped layer shows only where its base (the
+   * nearest unclipped layer below it) has pixels, and not at all while the base is hidden. E.preview (the Fabric dialog's live
+   * preview) adds layers above one layer and can show another picture for one layer, without touching the document.
+   */
   function composite(g, doc, withStroke) {
     g.clearRect(0, 0, doc.w, doc.h);
+    const pv = doc === E.doc ? E.preview : null;
+    const list = [];
     doc.layers.forEach((L, i) => {
-      if (!L.visible || L.editing) return;
+      list.push({ L, i, canvas: pv && pv.replace && pv.replace.i === i ? pv.replace.canvas : L.canvas });
+      if (pv && pv.after === i) for (const P of pv.layers) list.push({ L: P, i: -1, canvas: P.canvas });
+    });
+    let base = null;
+    for (const { L, i, canvas } of list) {
+      const clipped = !!(L.clip && base);
+      if (!clipped) base = { L, canvas };
+      if (!L.visible || L.editing || (clipped && (!base.L.visible || base.L.editing))) continue;
+      const stroke = withStroke && E.drawing && E.strokeLayer === i && E.opts.tool === 'brush';
+      if (clipped) {
+        g.globalAlpha = L.opacity * base.L.opacity;
+        g.globalCompositeOperation = L.blend;
+        g.drawImage(clippedTo(doc, canvas, base.canvas, stroke && E.stroke, E.opts.opacity), 0, 0);
+        continue;
+      }
       g.globalAlpha = L.opacity;
       g.globalCompositeOperation = L.blend;
-      g.drawImage(L.canvas, 0, 0);
-      if (withStroke && E.drawing && E.strokeLayer === i && E.opts.tool === 'brush') {
+      g.drawImage(canvas, 0, 0);
+      if (stroke) {
         g.globalAlpha = L.opacity * E.opts.opacity;
         g.drawImage(E.stroke, 0, 0);
       }
-    });
+    }
     g.globalAlpha = 1;
     g.globalCompositeOperation = 'source-over';
   }
@@ -262,8 +312,9 @@
       if (layer().locked || d.layers[d.active - 1].locked) { emit('warn', 'A locked layer cannot be merged. Unlock both layers first.'); return; }
       pushStruct();
       const top = layer(), below = d.layers[d.active - 1];
+      const src = top.clip && !below.clip ? clippedTo(d, top.canvas, below.canvas) : top.canvas;   // clipped to the layer it joins: only the part over its pixels
       below.ctx.globalAlpha = top.opacity; below.ctx.globalCompositeOperation = top.blend;
-      below.ctx.drawImage(top.canvas, 0, 0);
+      below.ctx.drawImage(src, 0, 0);
       below.ctx.globalAlpha = 1; below.ctx.globalCompositeOperation = 'source-over';
       below.text = null;                                 // the layer below now holds more than its text: it becomes plain pixels
       d.layers.splice(d.active, 1); d.active -= 1;
@@ -295,6 +346,46 @@
     emit('layers'); emit('change', { final: true }); E.render();
   };
 
+  /** A layer of the open document's size, not in the document yet: pixels from RGBA data or a canvas, and any of name, blend, opacity, clip. */
+  E.makeLayer = (pixels, o) => {
+    o = o || {};
+    const d = E.doc, L = new Layer(d.w, d.h, o.name);
+    if (pixels instanceof Uint8ClampedArray) L.ctx.putImageData(new ImageData(pixels, d.w, d.h), 0, 0);
+    else if (pixels) L.ctx.drawImage(pixels, 0, 0, d.w, d.h);
+    for (const k of ['blend', 'opacity', 'clip']) if (o[k] !== undefined) L[k] = o[k];
+    return L;
+  };
+
+  /** RGBA of one layer of the open document. */
+  E.layerRGBA = (i) => { const d = E.doc; return d.layers[i].ctx.getImageData(0, 0, d.w, d.h).data; };
+
+  /**
+   * A live preview that does not change the document: `layers` (from makeLayer) shown just above layer `after`, and
+   * `replace` ({ i, canvas }) shown instead of layer i. null ends it. The 3D view and thumbnails follow when the page asks.
+   */
+  E.setPreview = (p) => { E.preview = p || null; E.render(); };
+
+  /**
+   * Put new layers just above layer `after`, new pixels into a layer (`replace`: { i, rgba }) and another blend mode on a layer
+   * (`blend`: { i, mode }), all as one undo step. The top new layer becomes the selected one. Live text on a replaced layer
+   * turns into plain pixels.
+   */
+  E.insertLayers = ({ after, layers = [], replace = null, blend = null }) => {
+    settle();
+    const d = E.doc;
+    E.preview = null;
+    pushStruct();
+    if (replace) {
+      const L = d.layers[replace.i];
+      L.ctx.putImageData(new ImageData(replace.rgba, d.w, d.h), 0, 0);
+      L.text = null;
+    }
+    if (blend && BLEND_OK.has(blend.mode)) d.layers[blend.i].blend = blend.mode;
+    d.layers.splice(after + 1, 0, ...layers);
+    d.active = after + layers.length;
+    emit('layers'); emit('change', { final: true }); E.render();
+  };
+
   E.setGuide = (source) => {
     const d = E.doc;
     if (!source) { d.guide = null; E.render(); emit('layers'); return; }
@@ -306,7 +397,7 @@
   // ---------------------------------------------------------------- resolution
   function resampleLayer(L, w, h, kx, ky) {
     const n = new Layer(w, h, L.name);
-    n.visible = L.visible; n.opacity = L.opacity; n.blend = L.blend; n.locked = L.locked; n.autoPaint = L.autoPaint;   // autoPaint is pointed at the new layers by resizeDoc
+    n.visible = L.visible; n.opacity = L.opacity; n.blend = L.blend; n.clip = L.clip; n.locked = L.locked; n.autoPaint = L.autoPaint;   // autoPaint is pointed at the new layers by resizeDoc
     const live = L.text && Math.abs(kx - ky) < 1e-9 ? scaledAround(L.text, kx, 0, 0) : null;
     if (live) { E.drawText(n.ctx, live, live.x, live.y); n.text = live; }                       // live text is painted again at the new size: sharp, and still editable
     else {
@@ -848,7 +939,7 @@
     return {
       v: 1, w: doc.w, h: doc.h, active: doc.active,
       layers: doc.layers.map((L) => ({
-        name: L.name, visible: L.visible, opacity: L.opacity, blend: L.blend, locked: !!L.locked,
+        name: L.name, visible: L.visible, opacity: L.opacity, blend: L.blend, clip: L.clip || undefined, locked: !!L.locked,
         text: L.text || undefined,
         src: L.canvas.toDataURL('image/webp', 0.92),
       })),
@@ -867,7 +958,7 @@
     doc.layers = [];
     for (const l of obj.layers) {
       const L = new Layer(w, h, l.name);
-      L.visible = l.visible !== false; L.opacity = l.opacity == null ? 1 : l.opacity; L.blend = l.blend || 'source-over'; L.locked = !!l.locked;
+      L.visible = l.visible !== false; L.opacity = l.opacity == null ? 1 : l.opacity; L.blend = BLEND_OK.has(l.blend) ? l.blend : 'source-over'; L.clip = !!l.clip; L.locked = !!l.locked;
       L.ctx.drawImage(await loadImg(l.src), 0, 0, w, h);
       if (l.text && typeof l.text === 'object' && w === obj.w && h === obj.h) L.text = l.text;   // a rescaled project keeps the pixels but not the editable text
       doc.layers.push(L);

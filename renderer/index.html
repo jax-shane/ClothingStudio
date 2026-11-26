@@ -59,11 +59,14 @@
         <label>Opacity</label><input id="lOpacity" type="range" min="0" max="100" value="100"><span id="lOpacityV" class="val">100</span>
       </div>
       <div class="row">
-        <label>Blend</label><select id="lBlend"></select>
+        <label>Blend</label><select id="lBlend"></select><button id="lClip" class="btn small" title="Clip to the layer below: the layer only shows where that layer has pixels (Ctrl+G)">Clip</button>
       </div>
       <div class="row">
         <button id="lImport" class="btn small">Import image…</button>
         <button id="lGuideImport" class="btn small" title="Use an image as a see-through guide">As guide…</button>
+      </div>
+      <div class="row">
+        <button id="lFabric" class="btn small accent grow" title="Make a print look printed on the cloth: the fabric's folds and weave on it, bent along the creases (Ctrl+Shift+F)">Fabric look…</button>
       </div>
     </section>
   </aside>

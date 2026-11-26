@@ -55,9 +55,9 @@ export function addChoices(items) {
   return bigger.length ? { bigger, caps: [...caps].sort((a, b) => a - b) } : null;
 }
 
-/** About how much memory a texture with its mip levels takes in game, in MB (DXT1 half a byte per pixel, DXT5 one, uncompressed four, plus a third for the mips). */
+/** About how much memory a texture with its mip levels takes in game, in MB (DXT1 half a byte per pixel, DXT5 and BC7 one, uncompressed four, plus a third for the mips). */
 export function memoryMB(w, h, format) {
-  const bytesPerPixel = format === 'DXT5' ? 1 : format === 'A8R8G8B8' ? 4 : 0.5;
+  const bytesPerPixel = format === 'DXT5' || format === 'BC7' ? 1 : format === 'A8R8G8B8' ? 4 : 0.5;
   return (w * h * bytesPerPixel * 4 / 3) / (1024 * 1024);
 }
 

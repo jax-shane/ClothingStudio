@@ -4,6 +4,7 @@ import { Viewer } from './viewer.js';
 import { addPieceDialog, optionsDialog, groupText, pieceLabel } from './pieces.js';
 import { growSizes, textureSizeFor, addChoices, memoryMB, mbText } from './texsize.js';
 import { comboOf, shortcutMatches, digitOf } from './keys.js';
+import { GRAINS, foldsMap, grainMap, bend } from './fabric.js';
 
 const Paint = window.Paint;
 const $ = (s) => document.querySelector(s);
@@ -49,11 +50,13 @@ function toast(msg, kind = 'info', ms = 5000) {
 
 // check: an optional tick box under the text, { label, value }; `value` is updated with what the user left it at
 // content: an element for under the text, or a function that gets the finish callback (it ends the dialog with that answer) and returns one; wide: a wider card
-function modal({ title, lines = [], input = null, check = null, content = null, wide = false, buttons }) {
+// side: the card sits at the left over the panels and nothing is dimmed, so the texture and the 3D view stay visible (a live preview)
+function modal({ title, lines = [], input = null, check = null, content = null, wide = false, side = false, buttons }) {
   return new Promise((resolve) => {
     const m = $('#modal'), body = $('#mBody'), btns = $('#mBtns');
     $('#mTitle').textContent = title;
     m.querySelector('.card').classList.toggle('wide', !!wide);
+    m.classList.toggle('side', !!side);
     body.textContent = '';
     for (const l of lines) body.append(el('p', '', l));
     if (content) body.append(typeof content === 'function' ? content((v) => done(v)) : content);
@@ -1203,8 +1206,14 @@ function renderLayers() {
   list.textContent = '';
   if (!d) { syncLayerTools(); return; }
   for (let i = d.layers.length - 1; i >= 0; i--) {
-    const L = d.layers[i];
-    const row = el('div', 'layer' + (i === d.active ? ' active' : '') + (L.locked ? ' locked' : ''));
+    const L = d.layers[i], clipped = L.clip && i > 0;
+    const row = el('div', 'layer' + (i === d.active ? ' active' : '') + (L.locked ? ' locked' : '') + (clipped ? ' clipped' : ''));
+    if (clipped) {
+      const mark = el('span', 'clipmark', '↳');
+      mark.title = t('Clipped to the layer below: it only shows where that layer has pixels. Click to unclip.');
+      mark.onclick = (e) => { e.stopPropagation(); Paint.layerOp.set(i, 'clip', false); };
+      row.append(mark);
+    }
     const eye = iconSpan('eye' + (L.visible ? '' : ' off'), L.visible ? LAYER_ICON.eye : LAYER_ICON.eyeOff);
     eye.title = L.visible ? t('Showing. Click to hide this layer.') : t('Hidden. Click to show this layer.');
     eye.onclick = (e) => { e.stopPropagation(); Paint.layerOp.set(i, 'visible', !L.visible); };
@@ -1254,6 +1263,13 @@ function syncLayerTools() {
   $('#lDown').title = A && i <= 0 ? t('Down: this is already the bottom layer') : t('Move the selected layer down, behind the one below it (Ctrl+[)');
   $('#lDup').title = t('Duplicate: make a copy of the selected layer (Ctrl+J). A text layer stays editable.');
   $('#lCount').textContent = d ? `(${n})` : '';
+  const clip = $('#lClip'), clipped = !!(A && A.clip && i > 0);
+  clip.disabled = !A || i === 0;
+  clip.classList.toggle('on', clipped);
+  clip.title = !A || i === 0 ? t('Clip: the bottom layer has nothing below it to clip to')
+    : clipped ? t('Clipped: "{name}" only shows where the layer below has pixels. Click to unclip (Ctrl+G).', { name: A.name })
+      : t('Clip to the layer below: "{name}" then only shows where that layer has pixels, like a clipping mask in Photoshop (Ctrl+G)', { name: A.name });
+  $('#lFabric').disabled = !A;
 }
 
 function refreshThumbs() {
@@ -2172,8 +2188,13 @@ function wireLayerPanel() {
   $('#lDel').onclick = act(() => Paint.layerOp.remove());
   S.layerKeys = { j: () => Paint.layerOp.duplicate(), e: () => Paint.layerOp.mergeDown(), ']': () => Paint.layerOp.move(1), '[': () => Paint.layerOp.move(-1) };
   const blend = $('#lBlend');
-  for (const [v, label] of Paint.BLENDS) { const o = el('option', '', t(label)); o.value = v; blend.append(o); }
+  for (const b of Paint.BLENDS) {
+    if (!b) { const o = el('option', 'divider', '──────────'); o.disabled = true; blend.append(o); continue; }   // the groups of Photoshop's list
+    const o = el('option', '', t(b[1])); o.value = b[0]; blend.append(o);
+  }
   blend.onchange = () => Paint.doc && Paint.layerOp.set(Paint.doc.active, 'blend', blend.value);
+  $('#lClip').onclick = act((d) => { if (d.active > 0) Paint.layerOp.set(d.active, 'clip', !d.layers[d.active].clip); });
+  $('#lFabric').onclick = act(() => fabricLook());
   $('#lOpacity').oninput = (e) => {
     if (!Paint.doc) return;
     $('#lOpacityV').textContent = e.target.value;
@@ -2182,6 +2203,167 @@ function wireLayerPanel() {
   };
   $('#lImport').onclick = () => importImage('layer');
   $('#lGuideImport').onclick = () => importImage('guide');
+}
+
+// ---------------------------------------------------------------- Fabric look
+// A print pasted on a shirt looks flat because the cloth's folds and weave stop at its edge. Fabric look puts them back on top
+// of it as ordinary layers (change their Opacity / Blend later, or delete them): the folds and creases of the bottom layer (the
+// texture as it came from the .ytd) and a fabric grain, both grey maps blended with Hard light (grey 128 changes nothing) and
+// clipped to the print. It can also bend the print along the folds and change its blend mode (the "ink"). Everything shows
+// live while the dialog is open (Paint.setPreview) and goes into the document as one undo step.
+const GRAIN_LABELS = {
+  cotton: N_('Cotton (plain weave)'), jersey: N_('Jersey knit (T-shirt)'), denim: N_('Denim (twill)'), canvas: N_('Canvas'),
+  mesh: N_('Sports mesh'), fleece: N_('Fleece'), leather: N_('Leather'), noise: N_('Fine grain'),
+};
+const GRAIN_SIZE = { cotton: 3, jersey: 3, denim: 4, canvas: 3, mesh: 4, fleece: 4, leather: 4, noise: 3 };
+const FABRIC_BLENDS = [
+  ['hard-light', N_('Hard light: shading on every colour')],
+  ['overlay', N_('Overlay: strongest on mid tones')],
+  ['soft-light', N_('Soft light: gentle')],
+];
+const INKS = [
+  ['', N_('Leave it as it is')],
+  ['multiply', N_('Multiply: the cloth shows through the ink')],
+  ['source-over', N_('Normal: solid ink')],
+];
+/** The dialog's settings, kept until the app closes. foldSize 0: chosen from the texture's size the first time. */
+const FAB = { folds: true, foldStrength: 70, foldSize: 0, grain: true, grainKind: 'cotton', grainStrength: 30, grainSize: 3, look: 'hard-light', bend: false, bendAmount: 6, ink: '', onlyPrint: true };
+
+async function fabricLook() {
+  const d = Paint.doc;
+  if (!d || !S.sel) { toast(t('Pick a piece first.'), 'warn'); return; }
+  if (!textSettle()) return;
+  if (Paint.xf) Paint.xformEnd(true);                  // a resize that is still open is applied first
+  const w = d.w, h = d.h, ai = d.active;
+  let print = ai;                                      // the print: the selected layer, or the one a selected clipped layer belongs to
+  while (print > 0 && d.layers[print].clip) print--;
+  const P = d.layers[print], hasPrint = print > 0, canBend = hasPrint && !P.locked, oldInk = P.blend;
+  if (!FAB.foldSize) FAB.foldSize = clamp(Math.round(Math.max(w, h) / 128), 2, 32);
+
+  // the maps, each made once per setting while the dialog is open
+  const cache = new Map();
+  const cached = (key, make) => { if (!cache.has(key)) cache.set(key, make()); return cache.get(key); };
+  let base = null, printPx = null;
+  const folds = (size) => cached('f' + size, () => foldsMap(base || (base = Paint.layerRGBA(0)), w, h, { size }).rgba);
+  const grain = (kind, size) => cached(`g${kind}|${size}`, () => grainMap(kind, w, h, { size }).rgba);
+  const bent = (size, amount) => cached(`b${size}|${amount}`, () => bend(printPx || (printPx = Paint.layerRGBA(print)), w, h, folds(size), amount));
+
+  const foldLayer = Paint.makeLayer(null, { name: t('Fabric folds') }), grainLayer = Paint.makeLayer(null, {});
+  const bentCanvas = Paint.makeLayer(null, {}).canvas;
+  const put = (canvas, rgba) => canvas.getContext('2d').putImageData(new ImageData(rgba, w, h), 0, 0);
+  const shown = { fold: '', grain: '', bent: '' };
+  const plan = () => {                                 // what Add does with the settings as they are now
+    const only = hasPrint && FAB.onlyPrint;
+    return {
+      only, after: only ? ai : d.layers.length - 1,
+      layers: [FAB.grain && grainLayer, FAB.folds && foldLayer].filter(Boolean),
+      bend: canBend && only && FAB.bend && FAB.bendAmount > 0,
+      ink: hasPrint && FAB.ink && FAB.ink !== oldInk ? FAB.ink : null,
+    };
+  };
+  let sync = () => {};
+  function refresh() {
+    const p = plan();
+    if (FAB.folds && shown.fold !== String(FAB.foldSize)) { put(foldLayer.canvas, folds(FAB.foldSize)); shown.fold = String(FAB.foldSize); }
+    const gk = FAB.grainKind + '|' + FAB.grainSize;
+    if (FAB.grain && shown.grain !== gk) { put(grainLayer.canvas, grain(FAB.grainKind, FAB.grainSize)); shown.grain = gk; }
+    foldLayer.opacity = FAB.foldStrength / 100; grainLayer.opacity = FAB.grainStrength / 100;
+    foldLayer.blend = grainLayer.blend = FAB.look; foldLayer.clip = grainLayer.clip = p.only;
+    grainLayer.name = t('Fabric grain: {kind}', { kind: t(GRAIN_LABELS[FAB.grainKind]) });
+    let replace = null;
+    if (p.bend) {
+      const bk = FAB.foldSize + '|' + FAB.bendAmount;
+      if (shown.bent !== bk) { put(bentCanvas, bent(FAB.foldSize, FAB.bendAmount)); shown.bent = bk; }
+      replace = { i: print, canvas: bentCanvas };
+    }
+    P.blend = p.ink || oldInk;                          // the ink shows live; the old one is back before the real change, so Undo has it
+    Paint.setPreview({ after: p.after, layers: p.layers, replace });
+    onChange({ final: false });
+    setMsg('');
+    sync();
+  }
+  let queued = false;
+  const update = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; refresh(); }, 16); };
+
+  // ---- the dialog
+  const box = el('div', 'fab');
+  box.append(el('p', '', hasPrint
+    ? t('Makes "{name}" look printed on the cloth: the folds and the weave of the fabric show on it. They are added as layers you can change or delete later.', { name: P.name })
+    : t('Adds the folds and the weave of the fabric over the whole texture. To put them on a print only, select the print\'s layer first.')));
+  const row = (label, input, value) => { const r = el('div', 'fab-row'); r.append(el('label', '', label), input); if (value) r.append(value); return r; };
+  const slider = (label, min, max, key, unit, heavy) => {
+    const inp = el('input'), val = el('span', 'val');
+    inp.type = 'range'; inp.min = min; inp.max = max; inp.step = 1; inp.value = FAB[key];
+    const show = () => { val.textContent = inp.value + unit; };
+    show();
+    inp.addEventListener('input', () => { show(); if (!heavy) { FAB[key] = +inp.value; update(); } });
+    inp.addEventListener('change', () => { FAB[key] = +inp.value; update(); });     // a new map is made when the slider is let go
+    return { r: row(label, inp, val), inp, show };
+  };
+  const choice = (label, options, key, then) => {
+    const s = el('select');
+    for (const [v, label] of options) { const o = el('option', '', t(label)); o.value = v; s.append(o); }
+    s.value = FAB[key];
+    s.onchange = () => { FAB[key] = s.value; if (then) then(); update(); };
+    return row(label, s);
+  };
+  const section = (label, key, note) => {
+    const lab = el('label', 'fab-check'), cb = el('input'), part = el('div', 'fab-part');
+    cb.type = 'checkbox'; cb.checked = !!FAB[key];
+    cb.onchange = () => { FAB[key] = cb.checked; update(); };
+    lab.append(cb, document.createTextNode(' ' + label));
+    if (note) part.append(el('div', 'fab-note', note));
+    box.append(lab, part);
+    return { cb, part };
+  };
+
+  const fSec = section(t('Folds and creases'), 'folds', t('Taken from "{name}", the texture under your painting.', { name: d.layers[0].name }));
+  fSec.part.append(slider(t('Strength'), 0, 100, 'foldStrength', ' %').r, slider(t('Fold size'), 1, 48, 'foldSize', ' px', true).r);
+  const gSec = section(t('Fabric grain'), 'grain');
+  const gSize = slider(t('Grain size'), 1, 16, 'grainSize', ' px', true);
+  gSec.part.append(
+    choice(t('Fabric'), GRAINS.map((k) => [k, GRAIN_LABELS[k]]), 'grainKind', () => { FAB.grainSize = GRAIN_SIZE[FAB.grainKind]; gSize.inp.value = FAB.grainSize; gSize.show(); }),
+    slider(t('Strength'), 0, 100, 'grainStrength', ' %').r, gSize.r);
+  box.append(choice(t('Blend'), FABRIC_BLENDS, 'look'));
+  const bSec = section(t('Bend the print with the folds'), 'bend', !hasPrint ? t('Select the layer with your print to bend it.')
+    : P.locked ? t('"{name}" is locked. Unlock it to bend it.', { name: P.name })
+      : P.text ? t('"{name}" is live text: bending turns it into plain pixels (Undo brings the text back).', { name: P.name })
+        : t('Moves the pixels of "{name}" along the creases, like Photoshop\'s Displace filter. Best done last, after the print is in place.', { name: P.name }));
+  bSec.part.append(slider(t('Amount'), 1, 30, 'bendAmount', ' px', true).r);
+  if (hasPrint) {
+    box.append(choice(t('Ink'), INKS, 'ink'));
+    const where = el('div', 'fab-apply');
+    for (const [only, text] of [[true, t('Only on "{name}" (clipped to it)', { name: P.name })], [false, t('On the whole texture')]]) {
+      const lab = el('label'), r = el('input');
+      r.type = 'radio'; r.name = 'fabWhere'; r.checked = FAB.onlyPrint === only;
+      r.onchange = () => { FAB.onlyPrint = only; update(); };
+      lab.append(r, document.createTextNode(' ' + text));
+      where.append(lab);
+    }
+    box.append(row(t('Apply to'), where));
+  }
+  sync = () => {                                      // grey out what is switched off; Bend needs a print of its own
+    const bendable = canBend && FAB.onlyPrint;
+    fSec.part.classList.toggle('off', !FAB.folds);
+    gSec.part.classList.toggle('off', !FAB.grain);
+    bSec.cb.disabled = !bendable; bSec.cb.checked = bendable && FAB.bend;
+    bSec.part.classList.toggle('off', !(bendable && FAB.bend));
+  };
+
+  const answer = modal({ title: t('Fabric look'), content: box, side: true, buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'ok', label: t('Add'), accent: true }] });
+  setMsg(t('Making the fabric maps…'));
+  update();
+  const r = await answer;
+  if (r === 'ok') refresh();                           // a slider let go just before OK is in too
+  P.blend = oldInk;
+  const p = plan();
+  if (r !== 'ok' || (!p.layers.length && !p.bend && !p.ink)) { Paint.setPreview(null); onChange({ final: true }); setMsg(''); return; }
+  Paint.insertLayers({
+    after: p.after, layers: p.layers,
+    replace: p.bend ? { i: print, rgba: bent(FAB.foldSize, FAB.bendAmount) } : null,
+    blend: p.ink ? { i: print, mode: p.ink } : null,
+  });
+  toast(t('Fabric look added. Fine-tune it with the Opacity and Blend of its layers, or delete them.'), 'ok', 7000);
 }
 
 // ---------------------------------------------------------------- import / export / save
@@ -2418,6 +2600,8 @@ const SHORTCUTS = [
   { group: G.layers, keys: ['Alt+]', 'Alt+['], show: [['Alt', ']'], ['Alt', '[']], text: N_('Select the layer above / below'), run: (e, k) => onDoc((d) => Paint.layerOp.select(clamp(d.active + (k === 'Alt+]' ? 1 : -1), 0, d.layers.length - 1)))() },
   { group: G.layers, keys: ['Ctrl+,'], text: N_('Show / hide the layer'), run: onDoc((d) => Paint.layerOp.set(d.active, 'visible', !d.layers[d.active].visible)) },
   { group: G.layers, keys: ['Ctrl+/'], text: N_('Lock / unlock the layer'), run: clickBtn('#lLock') },
+  { group: G.layers, keys: ['Ctrl+G'], text: N_('Clip the layer to the one below / unclip it'), run: clickBtn('#lClip') },
+  { group: G.layers, keys: ['Ctrl+Shift+F'], text: N_('Fabric look… (folds, fabric grain, bend)'), run: clickBtn('#lFabric') },
   { group: G.layers, keys: ['F2'], text: N_('Rename layer'), run: clickBtn('#lRename') },
   { group: G.layers, keys: ['Delete'], text: N_('Delete the layer (Undo brings it back)'), run: clickBtn('#lDel') },
 
@@ -2530,7 +2714,7 @@ function wireKeys() {
 function refreshLanguage() {
   const code = getLanguage(), l = LANGUAGES.find((x) => x.code.toLowerCase() === code.toLowerCase());
   $('#btnLang').textContent = '🌐 ' + (l ? l.short : code.toUpperCase());
-  for (const o of $('#lBlend').options) { const b = Paint.BLENDS.find(([v]) => v === o.value); if (b) o.textContent = t(b[1]); }
+  for (const o of $('#lBlend').options) { const b = Paint.BLENDS.find((x) => x && x[0] === o.value); if (b) o.textContent = t(b[1]); }
   $('#vFull').textContent = S.fs ? t('Exit') : t('Full');
   updateBodyButton(); updatePopButton(); updateViewInfo();
   if (S.pack) localizePack(S.pack);

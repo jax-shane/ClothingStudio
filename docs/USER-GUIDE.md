@@ -77,6 +77,8 @@ More keys. Press **`F1`** (or **?**, or the **⌨** button at the top right) to 
 | `Alt+]`, `Alt+[` | Select the layer above / below |
 | `Ctrl+,` | Show / hide the selected layer |
 | `Ctrl+/` | Lock / unlock the selected layer |
+| `Ctrl+G` | Clip the selected layer to the layer below / unclip it (see [Layers](#layers)) |
+| `Ctrl+Shift+F` | Fabric look… (see [Fabric look](#fabric-look-make-a-print-look-printed)) |
 | `F2` | Rename the selected layer |
 | `Del` | Delete the selected layer (Undo brings it back; with only one layer it is cleared) |
 | `F` or `Ctrl+0` | Fit the texture in the view |
@@ -124,15 +126,46 @@ The list shows the **front-most layer first**. Click a layer to select it.
 | **Delete** | Removes the layer. With only one layer it says **Clear** and wipes the layer instead. Undo brings it back |
 
 **On each row:** the **eye** shows / hides the layer, the **padlock** locks it, the thumbnail shows its contents, a blue **T** marks
-live text (double-click it to edit).
+live text (double-click it to edit), a blue **↳** marks a clipped layer (click it to unclip).
 
-**Below the list:** **Opacity** and **Blend** (Normal, Multiply, Screen, Overlay, Soft light, Darken, Lighten) of the selected layer; **Import image…**
-adds a picture as a new layer and drops you straight into the Resize tool (a picture bigger than the texture first asks whether
-to keep the texture's size or make the texture bigger: see [Texture size](#texture-size)); **As guide…** shows a picture as a see-through
-tracing guide (never saved into the texture).
+**Below the list:**
 
-**Save to YTD** flattens all visible layers. **Save layers…** keeps them (and live text) in a `.csproj` file you can open
-again with **Open layers…**.
+- **Opacity** and **Blend** of the selected layer. The blend modes are Photoshop's, in its groups: **Normal**; **Darken**,
+  **Multiply**, **Colour burn**; **Lighten**, **Screen**, **Colour dodge**, **Linear dodge (add)**; **Overlay**, **Soft light**,
+  **Hard light**; **Difference**, **Exclusion**; **Hue**, **Saturation**, **Colour**, **Luminosity**. **Multiply** is the classic one
+  for prints: dark ink on light cloth, with the cloth's colour and folds showing through (white parts of the print disappear).
+- **Clip** (`Ctrl+G`): a **clipping mask**, like Photoshop's "clip to the layer below". The layer then only shows where the nearest
+  unclipped layer below it has pixels, so a shading or texture layer clipped to your logo stays on the logo. Several layers can be
+  clipped to the same one; hiding that layer hides them too.
+- **Import image…** adds a picture as a new layer and drops you straight into the Resize tool (a picture bigger than the texture first
+  asks whether to keep the texture's size or make the texture bigger: see [Texture size](#texture-size)); **As guide…** shows a picture
+  as a see-through tracing guide (never saved into the texture).
+- **Fabric look…**: see below.
+
+**Save to YTD** flattens all visible layers. **Save layers…** keeps them (with their blend modes, clipping and live text) in a
+`.csproj` file you can open again with **Open layers…**.
+
+## Fabric look: make a print look printed
+
+A logo or graphic pasted on a shirt looks flat because the folds, creases and weave of the cloth stop at its edge. **Fabric look…**
+(`Ctrl+Shift+F`, the blue button under the layers) puts them back on top of it. Select the layer with your print first, then:
+
+| Setting | Does |
+|---|---|
+| **Folds and creases** | The shading of the cloth, taken from the bottom layer (the texture as it came from the `.ytd`): its folds, creases and seams without its colours. **Strength** is how much shows; **Fold size** keeps only fine wrinkles (small) or wide folds as well (big) |
+| **Fabric grain** | A fabric surface: **Cotton**, **Jersey knit** (T-shirt), **Denim**, **Canvas**, **Sports mesh**, **Fleece**, **Leather** or **Fine grain**. **Grain size** is the distance between threads or stitches; each fabric starts at a size that suits it |
+| **Blend** | How the two are laid on: **Hard light** shades every colour, white ink too (the default); **Overlay** is strongest on mid tones and leaves white and black ink almost alone; **Soft light** is gentle |
+| **Bend the print with the folds** | Moves the pixels of the print along the creases, like Photoshop's **Displace** filter, so its straight lines follow the cloth. It changes the print layer itself (a live text layer becomes pixels), so do it last, when the print is in place |
+| **Ink** | The print layer's own blend mode: **Multiply** lets the cloth show through the ink, **Normal** is solid ink |
+| **Apply to** | **Only on** the print (the new layers are clipped to it, the default), or **on the whole texture** |
+
+Everything shows live on the texture and in the 3D view while the dialog is open. **Add** puts it in as ordinary layers, *Fabric
+grain: …* and *Fabric folds*, both clipped to your print and set to the blend you chose, so you can still change their **Opacity** and
+**Blend**, hide them or delete them. Moving the print later is fine: the folds and the grain stay where the cloth is. One `Ctrl+Z`
+takes all of it back.
+
+Tips: a print on a dark shirt is usually white or light ink, which **Hard light** shades well. Dark ink on a light shirt looks
+printed with **Ink: Multiply** alone. Lower **Strength** for flat, new-looking clothes; raise it for worn ones.
 
 ## The Text tool
 
@@ -348,7 +381,7 @@ and **Add piece…**. The choices:
 Good to know:
 
 - The sizes offered are the texture's own size doubled, up to **4096×4096**. A bigger texture keeps more detail but takes much more memory,
-  in game and in this editor: about 0.7 MB for 1024×1024, 2.7 MB for 2048×2048 and 11 MB for 4096×4096 (DXT1; DXT5 is twice that). The
+  in game and in this editor: about 0.7 MB for 1024×1024, 2.7 MB for 2048×2048 and 11 MB for 4096×4096 (DXT1; DXT5 and BC7 twice that). The
   dialog tells you. Every texture of a piece may have its own size; the `.ymt` only counts textures, it does not store their size.
 - A wide banner, or a logo that is merely large, is just fitted without asking. Tick **Always keep the texture size** in the question to
   stop it asking until the app is restarted.
@@ -359,7 +392,7 @@ Good to know:
 
 | Button | Does |
 |---|---|
-| **Save to YTD** (`Ctrl+S`) | Flattens the visible layers and writes them into the `.ytd` of the texture you are editing, at its original size (or the bigger size you chose, see [Texture size](#texture-size)) and format (DXT1 / DXT5 / A8R8G8B8; mips regenerated). The original is kept once as `.ytd.bak` |
+| **Save to YTD** (`Ctrl+S`) | Flattens the visible layers and writes them into the `.ytd` of the texture you are editing, at its original size (or the bigger size you chose, see [Texture size](#texture-size)) and format (DXT1 / DXT5 / BC7 / A8R8G8B8; mips regenerated). The original is kept once as `.ytd.bak` |
 | **Export PNG** | Saves the flattened texture as a PNG |
 | **Save layers… / Open layers…** | Keeps / restores all layers (and live text) in a `.csproj` file. Open them with the pack open and a piece selected: the layers load *into* that piece's texture |
 

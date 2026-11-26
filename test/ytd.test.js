@@ -48,14 +48,18 @@ describe('sizes and codecs', () => {
     assert.equal(ytd.levelSize(ytd.FMT.DXT1, 4, 4), 8);
     assert.equal(ytd.levelSize(ytd.FMT.DXT1, 1, 1), 8, 'even a 1 x 1 mip takes a whole block');
     assert.equal(ytd.levelSize(ytd.FMT.DXT5, 8, 8), 4 * 16);
+    assert.equal(ytd.levelSize(ytd.FMT.BC7, 8, 8), 4 * 16);
+    assert.equal(ytd.levelSize(ytd.FMT.BC7, 2, 2), 16);
     assert.equal(ytd.levelSize(ytd.FMT.A8R8G8B8, 8, 4), 128);
     assert.equal(ytd.chainSize(ytd.FMT.DXT1, 8, 8, 4), 4 * 8 + 8 + 8 + 8);
     assert.throws(() => ytd.levelSize(0x1234, 4, 4), /unsupported texture format 0x1234/);
+    assert.throws(() => ytd.levelSize(0x32495441, 4, 4), /unsupported texture format ATI2 \(0x32495441\)/, 'four-letter formats are named');
+    assert.deepEqual([0x31545844, 0x35545844, 0x20374342, 21].map(ytd.formatName), ['DXT1', 'DXT5', 'BC7', 'A8R8G8B8']);
   });
 
   it('buildChain produces exactly the size the file layout expects, for every format', () => {
     const w = 64, h = 32, rgba = solidRgba(10, 200, 90).subarray(0, w * h * 4);
-    for (const fmt of [ytd.FMT.DXT1, ytd.FMT.DXT5, ytd.FMT.A8R8G8B8]) {
+    for (const fmt of [ytd.FMT.DXT1, ytd.FMT.DXT5, ytd.FMT.BC7, ytd.FMT.A8R8G8B8]) {
       assert.equal(ytd.buildChain(rgba, w, h, fmt, 7).length, ytd.chainSize(fmt, w, h, 7), ytd.formatName(fmt));
     }
   });
@@ -304,6 +308,48 @@ describe('changing the size of a texture', () => {
       assert.ok(p.size >= bytes && p.size < Math.max(bytes * 2, 0x4000), 'smallest page for ' + bytes);
     }
     assert.throws(() => ytd.pageFlagsFor(0x10000001, old), /too large for one page/);
+  });
+});
+
+describe('BC7 textures', () => {
+  /** a one-texture BC7 dictionary of 1024 x 1024 with px in it: the template's header set to BC7, then written with a page of its own */
+  function bc7File(px) {
+    const f = templateAs(ytd.FMT.BC7, 1024, 9);
+    ytd.resizeTexture(f, 0, SIZE, SIZE, px, { backup: false });
+    return f;
+  }
+  const meanAbs = (a, b) => { let e = 0; for (let i = 0; i < a.length; i++) e += Math.abs(a[i] - b[i]); return e / a.length; };
+
+  it('open and decode (BC7 is the format behind "unsupported texture format 0x20374342")', () => {
+    const px = pattern(SIZE, SIZE);
+    const f = bc7File(px);
+    const t = ytd.readYtd(f).textures[0];
+    assert.deepEqual([t.formatName, t.width, t.height, t.stride, t.mips], ['BC7', SIZE, SIZE, 1024, 9]);
+    const d = ytd.decodeTexture(ytd.readYtd(f));
+    assert.equal(d.format, 'BC7');
+    assert.ok(meanAbs(d.rgba, px) < 1, 'mean error ' + meanAbs(d.rgba, px));
+  });
+
+  it('a painted BC7 texture is saved back as BC7 in place: only the pixels change, and the .bak is the original', () => {
+    const f = bc7File(pattern(SIZE, SIZE));
+    const before = fs.readFileSync(f), rscBefore = loadRsc(f);
+    const res = ytd.patchTexture(f, 0, solidRgba(200, 30, 60));
+    assert.equal(res.meanError, 0, 'a flat colour comes back exactly');
+    assert.ok(fs.readFileSync(f + '.bak').equals(before));
+    const back = ytd.readYtd(f), t = back.textures[0];
+    assert.deepEqual([t.formatName, t.width, t.height, t.stride, t.mips], ['BC7', SIZE, SIZE, 1024, 9]);
+    assert.ok(back.rsc.buf.subarray(0, back.rsc.sysSize).equals(rscBefore.buf.subarray(0, rscBefore.sysSize)), 'the system segment (headers) is untouched');
+    assert.equal(back.rsc.buf.length, rscBefore.buf.length);
+    assert.deepEqual(pixel(ytd.decodeTexture(back).rgba, SIZE, 100, 100), [200, 30, 60, 255]);
+  });
+
+  it('changes size and stays BC7', () => {
+    const f = bc7File(pattern(SIZE, SIZE));
+    ytd.resizeTexture(f, 0, 2048, 2048, pattern(2048, 2048), { backup: false });
+    const back = ytd.readYtd(f), t = back.textures[0];
+    assert.deepEqual([t.formatName, t.width, t.height, t.stride, t.mips], ['BC7', 2048, 2048, 2048, 10]);
+    assert.equal(back.rsc.gfxSize, 0x800000, '2048 x 2048 BC7 with mips is 5.3 MB, so an 8 MiB page');
+    assert.ok(meanAbs(ytd.decodeTexture(back).rgba, pattern(2048, 2048)) < 1);
   });
 });
 

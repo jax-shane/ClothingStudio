@@ -36,7 +36,7 @@ If you change an English text in the code, or add one, run `node tools/i18n.js e
 
 * Keep `{placeholders}` exactly as they are (`{n}`, `{name}`, `{file}` ...). They are filled in by the program and may move within the sentence. `{n}` is a number.
 * Keep a trailing `…` where the English has one (it means "a dialog follows").
-* Do not translate: ClothingStudio, FiveM, GTA V, OpenIV, file names and extensions (`.ytd`, `.ydd`, `.ymt`, `.meta`, `dlc.rpf`, `fxmanifest.lua`), texture formats (DXT1, DXT5, A8R8G8B8), PNG / JPG / WEBP, `UV`, `mips`, `PRF_ALPHA` and the other flag names, key names like Ctrl, Shift, Alt, Esc, Enter, F11 (write them as they are printed on keyboards of that language, for example Strg in German).
+* Do not translate: ClothingStudio, FiveM, GTA V, OpenIV, file names and extensions (`.ytd`, `.ydd`, `.ymt`, `.meta`, `dlc.rpf`, `fxmanifest.lua`), texture formats (DXT1, DXT5, BC7, A8R8G8B8), PNG / JPG / WEBP, `UV`, `mips`, `PRF_ALPHA` and the other flag names, key names like Ctrl, Shift, Alt, Esc, Enter, F11 (write them as they are printed on keyboards of that language, for example Strg in German).
 * Words in quotation marks that name a button or a panel ("Add piece…", "Save to YTD") must be the same words as that button's translation.
 * Use the words that Windows, Photoshop / Paint.NET and GTA V modding use in that language: "Recycle Bin" is the word of Windows in that language, the blend modes (Multiply, Screen, Overlay ...) the names of the painting programs.
 * Buttons are small: keep a label about as short as the English one. The checker warns about texts that are much longer.

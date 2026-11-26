@@ -5,6 +5,19 @@ All notable changes to ClothingStudio. The format follows [Keep a Changelog](htt
 ## [Unreleased]
 
 ### Added
+- **Fabric look** (the blue button under the layers, `Ctrl+Shift+F`): makes a print look printed on the cloth instead of pasted on.
+  It lays the **folds and creases** of the texture itself (the bottom layer's shading without its colours: a high-pass of its
+  brightness, levelled so faint creases show too) and a **fabric grain** (cotton, jersey knit, denim, canvas, sports mesh, fleece,
+  leather, fine grain) over the selected layer, blended with Hard light, Overlay or Soft light and clipped to it. It can also **bend
+  the print along the folds** (like Photoshop's Displace filter: premultiplied, so no dark rims) and set the print's **ink** to
+  Multiply. Everything shows live on the texture and in the 3D view while the dialog is open (it sits at the side and dims nothing);
+  **Add** puts it in as ordinary layers (*Fabric grain: …*, *Fabric folds*) in one undo step. New `renderer/js/fabric.js` holds the
+  maps (no page, tested in Node).
+- **Ten more blend modes**, in Photoshop's order and groups: Colour burn, Colour dodge, Linear dodge (add), Hard light, Difference,
+  Exclusion, Hue, Saturation, Colour and Luminosity, next to Normal, Multiply, Screen, Overlay, Soft light, Darken and Lighten.
+- **Clipping masks**: **Clip** next to Blend (`Ctrl+G`) shows a layer only where the nearest unclipped layer below it has pixels, like
+  Photoshop's "clip to the layer below". Clipped layers are marked **↳** in the list; Merge down keeps the clip; layered projects
+  (`.csproj`) save it.
 - **Keyboard shortcuts** for nearly everything, with **F1** (or **?**, or the new **⌨** button) showing them all: `Ctrl+O` open pack,
   `Ctrl+Shift+S` / `Ctrl+Shift+O` save / open layers, `Ctrl+Shift+E` export PNG, `Ctrl+I` import image, `Ctrl+B` build; `Page Down` /
   `Page Up` next / previous texture (on into the next piece), `Ctrl+Page Down` / `Ctrl+Page Up` next / previous piece, `Ctrl+D` copy the
@@ -53,6 +66,13 @@ All notable changes to ClothingStudio. The format follows [Keep a Changelog](htt
 - The pop-out 3D window takes its language and title from the editor.
 
 ### Fixed
+- **BC7 textures could not be opened** ("Error invoking remote method 'tex:load': Error: unsupported texture format 0x20374342"), although
+  OpenIV and other tools show them. ClothingStudio now reads BC7 (`0x20374342` is "BC7 " in the file) and writes a painted BC7 texture
+  back as BC7, also through Add textures, Copy and the bigger-texture sizes. New `src/lib/bc7.js`: the decoder reads all eight BC7 block
+  modes and was checked against a graphics card's own BC7 decoder (Direct3D 11): over 600 000 random blocks of every mode came out
+  identical. The encoder uses mode 6 (16 steps between two colours per 4×4 block, against DXT5's 4) and mode 5 where a block's
+  transparency needs a line of its own, so fully opaque and fully transparent pixels stay exactly so. Not tried in game yet.
+- A texture format ClothingStudio cannot read is named in the error when it has a four-letter code (`ATI2 (0x32495441)`).
 - Electron's hidden default menu still answered `Ctrl+R` (reload the window, throwing unsaved painting away) and `Ctrl+0` / `Ctrl+=` /
   `Ctrl+-` (zoom the whole window). The app has no application menu now, so those keys are the editor's own.
 

@@ -1,25 +1,28 @@
 'use strict';
 // GTA V .ytd (texture dictionary): read, decode to RGBA, re-encode and patch
 // the pixels back into the original file. Supports the formats addon clothing
-// uses: DXT1, DXT5 and A8R8G8B8, including mip chains.
+// uses: DXT1, DXT5, BC7 and A8R8G8B8, including mip chains.
 
 const fs = require('fs');
 const zlib = require('zlib');
 const { loadRsc, ptrAt, resolve, cstring } = require('./rsc');
+const bc7 = require('./bc7');
 
-const FMT = { DXT1: 0x31545844, DXT5: 0x35545844, A8R8G8B8: 21 };
+const FMT = { DXT1: 0x31545844, DXT5: 0x35545844, BC7: 0x20374342, A8R8G8B8: 21 };
 
+/** 'DXT1', 'BC7' ...; a format ClothingStudio cannot read shows its four letters when it has them ('ATI2 (0x32495441)'), else its number. */
 function formatName(f) {
-  if (f === FMT.DXT1) return 'DXT1';
-  if (f === FMT.DXT5) return 'DXT5';
-  if (f === FMT.A8R8G8B8) return 'A8R8G8B8';
-  return '0x' + f.toString(16);
+  for (const name of Object.keys(FMT)) if (FMT[name] === f) return name;
+  const code = Buffer.alloc(4);
+  code.writeUInt32LE(f >>> 0);
+  const letters = code.toString('latin1'), hex = '0x' + (f >>> 0).toString(16);
+  return /^[A-Z0-9]{3,4} ?$/.test(letters) ? `${letters.trim()} (${hex})` : hex;
 }
 
 // ------------------------------------------------------------------ layout
 function levelSize(fmt, w, h) {
   if (fmt === FMT.DXT1) return Math.max(1, (w + 3) >> 2) * Math.max(1, (h + 3) >> 2) * 8;
-  if (fmt === FMT.DXT5) return Math.max(1, (w + 3) >> 2) * Math.max(1, (h + 3) >> 2) * 16;
+  if (fmt === FMT.DXT5 || fmt === FMT.BC7) return Math.max(1, (w + 3) >> 2) * Math.max(1, (h + 3) >> 2) * 16;
   if (fmt === FMT.A8R8G8B8) return w * h * 4;
   throw new Error('unsupported texture format ' + formatName(fmt));
 }
@@ -126,6 +129,7 @@ function decodeBGRA(buf, off, w, h, stride) {
 function decodeLevel(buf, off, fmt, w, h, stride) {
   if (fmt === FMT.DXT1) return decodeDXT(buf, off, w, h, false);
   if (fmt === FMT.DXT5) return decodeDXT(buf, off, w, h, true);
+  if (fmt === FMT.BC7) return bc7.decode(buf, off, w, h);
   if (fmt === FMT.A8R8G8B8) return decodeBGRA(buf, off, w, h, stride);
   throw new Error('unsupported texture format ' + formatName(fmt));
 }
@@ -234,6 +238,7 @@ function encodeBGRA(rgba, w, h) {
 function encodeLevel(rgba, w, h, fmt) {
   if (fmt === FMT.DXT1) return encodeDXT(rgba, w, h, false);
   if (fmt === FMT.DXT5) return encodeDXT(rgba, w, h, true);
+  if (fmt === FMT.BC7) return bc7.encode(rgba, w, h);
   if (fmt === FMT.A8R8G8B8) return encodeBGRA(rgba, w, h);
   throw new Error('unsupported texture format ' + formatName(fmt));
 }
@@ -324,7 +329,7 @@ function meanErrorOf(ytd, index, rgba, format) {
 const MAX_RESIZE = 4096;                               // the largest side ClothingStudio writes (a 4096 x 4096 DXT1 texture is about 11 MB in memory, DXT5 about 22 MB)
 const isPow2 = (n) => Number.isInteger(n) && n >= 4 && (n & (n - 1)) === 0;
 const fullChain = (w, h) => Math.floor(Math.log2(Math.max(w, h))) + 1;           // levels from w x h down to 1 x 1
-const strideFor = (fmt, w) => (fmt === FMT.DXT1 ? w / 2 : fmt === FMT.DXT5 ? w : w * 4);   // bytes of one row of pixels at the format's bits per pixel (the template: 1024 wide DXT1 = 512)
+const strideFor = (fmt, w) => (fmt === FMT.DXT1 ? w / 2 : fmt === FMT.DXT5 || fmt === FMT.BC7 ? w : w * 4);   // bytes of one row of pixels at the format's bits per pixel (the template: 1024 wide DXT1 = 512)
 
 /** Mip levels for a new size: a file that stops short of 1 x 1 (the bundled template stops at 4 x 4) keeps stopping just as far short. */
 function mipsForSize(t, w, h) {

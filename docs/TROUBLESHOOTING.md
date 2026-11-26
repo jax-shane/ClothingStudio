@@ -53,6 +53,11 @@ They cannot apply: **Up** is grey on the top layer, **Down** and **Merge** on th
 **I can't paint on a layer.**
 It is probably **locked** (padlock) or **hidden** (eye). The status line says so.
 
+**"unsupported texture format …" when you click a texture.**
+The `.ytd` uses a pixel format ClothingStudio cannot read. DXT1, DXT5, BC7 and A8R8G8B8 work (BC7, `0x20374342`, needs a version newer
+than 0.2.1). Others, such as `ATI1` / `ATI2` (mostly normal maps), do not yet. You can convert the texture to DXT5 or BC7 in OpenIV, a
+texture toolkit or CodeWalker and open it again.
+
 **Paint doesn't show on the model.**
 Check you are editing the texture that piece actually uses (the highlighted letter), and that the layer is visible and has some
 opacity. For props such as hats the model is shown on the head.
@@ -65,8 +70,8 @@ or server) and try again. The app never writes half a file: the new texture is v
 
 **It looks different or blocky in game.**
 DXT1 and DXT5 are compressed formats and the app has to compress your painting back into them. Flat colours, logos and text are
-fine; smooth photographic gradients can band. If the texture is **A8R8G8B8** nothing is lost. A texture can only be saved in the
-format and size it already has.
+fine; smooth photographic gradients can band. **BC7** is compressed too but keeps far more. If the texture is **A8R8G8B8** nothing is
+lost. A texture can only be saved in the format and size it already has.
 
 **I saved, but nothing changes in game.**
 `refresh`, then `restart <your resource>` on the server, or restart the server. FiveM clients may keep a cache: rejoining or

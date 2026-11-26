@@ -28,8 +28,10 @@ export default {
     'Delete': 'Delete', // span in index.html
     'Opacity': 'Opacity', // label in index.html
     'Blend': 'Blend', // label in index.html
+    'Clip': 'Clip', // button #lClip in index.html
     'Import image…': 'Import image…', // button #lImport in index.html
     'As guide…': 'As guide…', // button #lGuideImport in index.html
+    'Fabric look…': 'Fabric look…', // button #lFabric in index.html
     'Size': 'Size', // label in index.html
     'Hardness': 'Hardness', // label in index.html
     'Tolerance': 'Tolerance', // label in index.html
@@ -111,7 +113,9 @@ export default {
     'Merge down: join the selected layer into the layer below it (they become one)': 'Merge down: join the selected layer into the layer below it (they become one)', // button #lMerge in index.html
     'Rename the selected layer (or double-click its name)': 'Rename the selected layer (or double-click its name)', // button #lRename in index.html
     'Delete the selected layer (Undo brings it back)': 'Delete the selected layer (Undo brings it back)', // button #lDel in index.html
+    'Clip to the layer below: the layer only shows where that layer has pixels (Ctrl+G)': 'Clip to the layer below: the layer only shows where that layer has pixels (Ctrl+G)', // button #lClip in index.html
     'Use an image as a see-through guide': 'Use an image as a see-through guide', // button #lGuideImport in index.html
+    'Make a print look printed on the cloth: the fabric\'s folds and weave on it, bent along the creases (Ctrl+Shift+F)': 'Make a print look printed on the cloth: the fabric\'s folds and weave on it, bent along the creases (Ctrl+Shift+F)', // button #lFabric in index.html
     'Pick the font. You can also type any font name that is installed on this PC.': 'Pick the font. You can also type any font name that is installed on this PC.', // button #oFont in index.html
     'Text size in texture pixels': 'Text size in texture pixels', // input #oFontSize in index.html
     'Bold': 'Bold', // button #oBold in index.html
@@ -347,6 +351,7 @@ export default {
     'The 3D view is open in its own window. Drag it to your other monitor, then double-click it for full screen.': 'The 3D view is open in its own window. Drag it to your other monitor, then double-click it for full screen.', // : t('The 3D view is open in its own window. Drag it to your other monitor, then double-click it for full scree
     'Could not open the 3D window: {error}': 'Could not open the 3D window: {error}', // } catch (e) { toast(t('Could not open the 3D window: {error}', { error: e.message || e }), 'error', 8000); }
     'Rename layer': 'Rename layer', // const v = await askText(t('Rename layer'), L.name);
+    'Clipped to the layer below: it only shows where that layer has pixels. Click to unclip.': 'Clipped to the layer below: it only shows where that layer has pixels. Click to unclip.', // mark.title = t('Clipped to the layer below: it only shows where that layer has pixels. Click to unclip.');
     'Showing. Click to hide this layer.': 'Showing. Click to hide this layer.', // eye.title = L.visible ? t('Showing. Click to hide this layer.') : t('Hidden. Click to show this layer.');
     'Hidden. Click to show this layer.': 'Hidden. Click to show this layer.', // eye.title = L.visible ? t('Showing. Click to hide this layer.') : t('Hidden. Click to show this layer.');
     'Locked. Click to unlock this layer.': 'Locked. Click to unlock this layer.', // lock.title = L.locked ? t('Locked. Click to unlock this layer.') : t('Click to lock this layer so it cannot be
@@ -364,6 +369,9 @@ export default {
     'Down: this is already the bottom layer': 'Down: this is already the bottom layer', // $('#lDown').title = A && i <= 0 ? t('Down: this is already the bottom layer') : t('Move the selected layer dow
     'Move the selected layer down, behind the one below it (Ctrl+[)': 'Move the selected layer down, behind the one below it (Ctrl+[)', // $('#lDown').title = A && i <= 0 ? t('Down: this is already the bottom layer') : t('Move the selected layer dow
     'Duplicate: make a copy of the selected layer (Ctrl+J). A text layer stays editable.': 'Duplicate: make a copy of the selected layer (Ctrl+J). A text layer stays editable.', // $('#lDup').title = t('Duplicate: make a copy of the selected layer (Ctrl+J). A text layer stays editable.');
+    'Clip: the bottom layer has nothing below it to clip to': 'Clip: the bottom layer has nothing below it to clip to', // clip.title = !A || i === 0 ? t('Clip: the bottom layer has nothing below it to clip to')
+    'Clipped: "{name}" only shows where the layer below has pixels. Click to unclip (Ctrl+G).': 'Clipped: "{name}" only shows where the layer below has pixels. Click to unclip (Ctrl+G).', // : clipped ? t('Clipped: "{name}" only shows where the layer below has pixels. Click to unclip (Ctrl+G).', { na
+    'Clip to the layer below: "{name}" then only shows where that layer has pixels, like a clipping mask in Photoshop (Ctrl+G)': 'Clip to the layer below: "{name}" then only shows where that layer has pixels, like a clipping mask in Photoshop (Ctrl+G)', // : t('Clip to the layer below: "{name}" then only shows where that layer has pixels, like a clipping mask in Ph
     'This layer is locked. Unlock it (padlock in the Layers list) to resize it.': 'This layer is locked. Unlock it (padlock in the Layers list) to resize it.', // toast(L.locked ? t('This layer is locked. Unlock it (padlock in the Layers list) to resize it.')
     'This layer is hidden. Show it to resize it.': 'This layer is hidden. Show it to resize it.', // : !L.visible ? t('This layer is hidden. Show it to resize it.')
     'This layer has nothing on it yet, so there is nothing to resize. Pick a layer with an image, or import one.': 'This layer has nothing on it yet, so there is nothing to resize. Pick a layer with an image, or import one.', // : t('This layer has nothing on it yet, so there is nothing to resize. Pick a layer with an image, or import on
@@ -382,10 +390,49 @@ export default {
     'That font file could not be loaded: {error}': 'That font file could not be loaded: {error}', // toast(t('That font file could not be loaded: {error}', { error: String(err.message || err) }), 'error', 6000);
     'Text: click on the texture, then type. Ctrl+Enter places it · Esc cancels · drag ✥ to move it': 'Text: click on the texture, then type. Ctrl+Enter places it · Esc cancels · drag ✥ to move it', // if (tool === 'text' && was !== 'text') setMsg(t('Text: click on the texture, then type. Ctrl+Enter places it ·
     'Resize: drag a corner to scale · Shift = free stretch · Alt = from the centre · drag the round knob to rotate · Enter applies · Esc cancels': 'Resize: drag a corner to scale · Shift = free stretch · Alt = from the centre · drag the round knob to rotate · Enter applies · Esc cancels', // if (was !== tool) setMsg(t('Resize: drag a corner to scale · Shift = free stretch · Alt = from the centre · dr
+    'Cotton (plain weave)': 'Cotton (plain weave)', // cotton: N_('Cotton (plain weave)'), jersey: N_('Jersey knit (T-shirt)'), denim: N_('Denim (twill)'), canvas: N
+    'Jersey knit (T-shirt)': 'Jersey knit (T-shirt)', // cotton: N_('Cotton (plain weave)'), jersey: N_('Jersey knit (T-shirt)'), denim: N_('Denim (twill)'), canvas: N
+    'Denim (twill)': 'Denim (twill)', // cotton: N_('Cotton (plain weave)'), jersey: N_('Jersey knit (T-shirt)'), denim: N_('Denim (twill)'), canvas: N
+    'Canvas': 'Canvas', // cotton: N_('Cotton (plain weave)'), jersey: N_('Jersey knit (T-shirt)'), denim: N_('Denim (twill)'), canvas: N
+    'Sports mesh': 'Sports mesh', // mesh: N_('Sports mesh'), fleece: N_('Fleece'), leather: N_('Leather'), noise: N_('Fine grain'),
+    'Fleece': 'Fleece', // mesh: N_('Sports mesh'), fleece: N_('Fleece'), leather: N_('Leather'), noise: N_('Fine grain'),
+    'Leather': 'Leather', // mesh: N_('Sports mesh'), fleece: N_('Fleece'), leather: N_('Leather'), noise: N_('Fine grain'),
+    'Fine grain': 'Fine grain', // mesh: N_('Sports mesh'), fleece: N_('Fleece'), leather: N_('Leather'), noise: N_('Fine grain'),
+    'Hard light: shading on every colour': 'Hard light: shading on every colour', // ['hard-light', N_('Hard light: shading on every colour')],
+    'Overlay: strongest on mid tones': 'Overlay: strongest on mid tones', // ['overlay', N_('Overlay: strongest on mid tones')],
+    'Soft light: gentle': 'Soft light: gentle', // ['soft-light', N_('Soft light: gentle')],
+    'Leave it as it is': 'Leave it as it is', // ['', N_('Leave it as it is')],
+    'Multiply: the cloth shows through the ink': 'Multiply: the cloth shows through the ink', // ['multiply', N_('Multiply: the cloth shows through the ink')],
+    'Normal: solid ink': 'Normal: solid ink', // ['source-over', N_('Normal: solid ink')],
+    'Pick a piece first.': 'Pick a piece first.', // if (!d || !S.sel) { toast(t('Pick a piece first.'), 'warn'); return; }
+    'Fabric folds': 'Fabric folds', // const foldLayer = Paint.makeLayer(null, { name: t('Fabric folds') }), grainLayer = Paint.makeLayer(null, {});
+    'Fabric grain: {kind}': 'Fabric grain: {kind}', // grainLayer.name = t('Fabric grain: {kind}', { kind: t(GRAIN_LABELS[FAB.grainKind]) });
+    'Makes "{name}" look printed on the cloth: the folds and the weave of the fabric show on it. They are added as layers you can change or delete later.': 'Makes "{name}" look printed on the cloth: the folds and the weave of the fabric show on it. They are added as layers you can change or delete later.', // ? t('Makes "{name}" look printed on the cloth: the folds and the weave of the fabric show on it. They are adde
+    'Adds the folds and the weave of the fabric over the whole texture. To put them on a print only, select the print\'s layer first.': 'Adds the folds and the weave of the fabric over the whole texture. To put them on a print only, select the print\'s layer first.', // : t('Adds the folds and the weave of the fabric over the whole texture. To put them on a print only, select th
+    'Folds and creases': 'Folds and creases', // const fSec = section(t('Folds and creases'), 'folds', t('Taken from "{name}", the texture under your painting.
+    'Taken from "{name}", the texture under your painting.': 'Taken from "{name}", the texture under your painting.', // const fSec = section(t('Folds and creases'), 'folds', t('Taken from "{name}", the texture under your painting.
+    'Strength': 'Strength', // fSec.part.append(slider(t('Strength'), 0, 100, 'foldStrength', ' %').r, slider(t('Fold size'), 1, 48, 'foldSiz
+    'Fold size': 'Fold size', // fSec.part.append(slider(t('Strength'), 0, 100, 'foldStrength', ' %').r, slider(t('Fold size'), 1, 48, 'foldSiz
+    'Fabric grain': 'Fabric grain', // const gSec = section(t('Fabric grain'), 'grain');
+    'Grain size': 'Grain size', // const gSize = slider(t('Grain size'), 1, 16, 'grainSize', ' px', true);
+    'Fabric': 'Fabric', // choice(t('Fabric'), GRAINS.map((k) => [k, GRAIN_LABELS[k]]), 'grainKind', () => { FAB.grainSize = GRAIN_SIZE[F
+    'Bend the print with the folds': 'Bend the print with the folds', // const bSec = section(t('Bend the print with the folds'), 'bend', !hasPrint ? t('Select the layer with your pri
+    'Select the layer with your print to bend it.': 'Select the layer with your print to bend it.', // const bSec = section(t('Bend the print with the folds'), 'bend', !hasPrint ? t('Select the layer with your pri
+    '"{name}" is locked. Unlock it to bend it.': '"{name}" is locked. Unlock it to bend it.', // : P.locked ? t('"{name}" is locked. Unlock it to bend it.', { name: P.name })
+    '"{name}" is live text: bending turns it into plain pixels (Undo brings the text back).': '"{name}" is live text: bending turns it into plain pixels (Undo brings the text back).', // : P.text ? t('"{name}" is live text: bending turns it into plain pixels (Undo brings the text back).', { name:
+    'Moves the pixels of "{name}" along the creases, like Photoshop\'s Displace filter. Best done last, after the print is in place.': 'Moves the pixels of "{name}" along the creases, like Photoshop\'s Displace filter. Best done last, after the print is in place.', // : t('Moves the pixels of "{name}" along the creases, like Photoshop\'s Displace filter. Best done last, after 
+    'Amount': 'Amount', // bSec.part.append(slider(t('Amount'), 1, 30, 'bendAmount', ' px', true).r);
+    'Ink': 'Ink', // box.append(choice(t('Ink'), INKS, 'ink'));
+    'Only on "{name}" (clipped to it)': 'Only on "{name}" (clipped to it)', // for (const [only, text] of [[true, t('Only on "{name}" (clipped to it)', { name: P.name })], [false, t('On the
+    'On the whole texture': 'On the whole texture', // for (const [only, text] of [[true, t('Only on "{name}" (clipped to it)', { name: P.name })], [false, t('On the
+    'Apply to': 'Apply to', // box.append(row(t('Apply to'), where));
+    'Fabric look': 'Fabric look', // const answer = modal({ title: t('Fabric look'), content: box, side: true, buttons: [{ id: 'cancel', label: t('
+    'Add': 'Add', // const answer = modal({ title: t('Fabric look'), content: box, side: true, buttons: [{ id: 'cancel', label: t('
+    'Making the fabric maps…': 'Making the fabric maps…', // setMsg(t('Making the fabric maps…'));
+    'Fabric look added. Fine-tune it with the Opacity and Blend of its layers, or delete them.': 'Fabric look added. Fine-tune it with the Opacity and Blend of its layers, or delete them.', // toast(t('Fabric look added. Fine-tune it with the Opacity and Blend of its layers, or delete them.'), 'ok', 70
     'Always keep the texture size, do not ask again (until the app is restarted)': 'Always keep the texture size, do not ask again (until the app is restarted)', // const check = { label: t('Always keep the texture size, do not ask again (until the app is restarted)'), value
     'Bigger than the texture': 'Bigger than the texture', // title: t('Bigger than the texture'),
     'Resize to {size}': 'Resize to {size}', // ...sizes.map((s) => ({ id: `s${s.w}x${s.h}`, label: t('Resize to {size}', { size: `${s.w}×${s.h}` }) }))],
-    'Pick a piece first.': 'Pick a piece first.', // if (!Paint.doc) { toast(t('Pick a piece first.'), 'warn'); return; }
     '"{name}" is {size}, bigger than this texture ({cur}).': '"{name}" is {size}, bigger than this texture ({cur}).', // intro: name ? t('"{name}" is {size}, bigger than this texture ({cur}).', { name, size: `${iw}×${ih}`, cur }) :
     'This image is {size}, bigger than this texture ({cur}).': 'This image is {size}, bigger than this texture ({cur}).', // intro: name ? t('"{name}" is {size}, bigger than this texture ({cur}).', { name, size: `${iw}×${ih}`, cur }) :
     'Keep {cur} and the image is scaled down to fit.': 'Keep {cur} and the image is scaled down to fit.', // keepNote: t('Keep {cur} and the image is scaled down to fit.', { cur }),
@@ -454,6 +501,8 @@ export default {
     'Select the layer above / below': 'Select the layer above / below', // { group: G.layers, keys: ['Alt+]', 'Alt+['], show: [['Alt', ']'], ['Alt', '[']], text: N_('Select the layer ab
     'Show / hide the layer': 'Show / hide the layer', // { group: G.layers, keys: ['Ctrl+,'], text: N_('Show / hide the layer'), run: onDoc((d) => Paint.layerOp.set(d.
     'Lock / unlock the layer': 'Lock / unlock the layer', // { group: G.layers, keys: ['Ctrl+/'], text: N_('Lock / unlock the layer'), run: clickBtn('#lLock') },
+    'Clip the layer to the one below / unclip it': 'Clip the layer to the one below / unclip it', // { group: G.layers, keys: ['Ctrl+G'], text: N_('Clip the layer to the one below / unclip it'), run: clickBtn('#
+    'Fabric look… (folds, fabric grain, bend)': 'Fabric look… (folds, fabric grain, bend)', // { group: G.layers, keys: ['Ctrl+Shift+F'], text: N_('Fabric look… (folds, fabric grain, bend)'), run: clickBtn
     'Delete the layer (Undo brings it back)': 'Delete the layer (Undo brings it back)', // { group: G.layers, keys: ['Delete'], text: N_('Delete the layer (Undo brings it back)'), run: clickBtn('#lDel'
     'Fit the texture in the view': 'Fit the texture in the view', // { group: G.view, keys: ['F', 'Ctrl+0'], text: N_('Fit the texture in the view'), run: () => fit() },
     'Zoom in / out': 'Zoom in / out', // { group: G.view, keys: ['Ctrl+=', 'Ctrl+Shift+=', 'Ctrl++'], show: [['Ctrl', '+'], ['Ctrl', '-']], text: N_('Z
@@ -602,13 +651,23 @@ export default {
     'Blank': 'Blank', // const blank = el('button', 'btn small', t('Blank')); blank.title = t('A plain grey texture to paint on');
     'A plain grey texture to paint on': 'A plain grey texture to paint on', // const blank = el('button', 'btn small', t('Blank')); blank.title = t('A plain grey texture to paint on');
     'blank grey': 'blank grey', // blank.onclick = () => { r.textures.push({ kind: 'blank', name: t('blank grey') }); redraw(); };
-    'Normal': 'Normal', // ['source-over', N_('Normal')], ['multiply', N_('Multiply')], ['screen', N_('Screen')],
-    'Multiply': 'Multiply', // ['source-over', N_('Normal')], ['multiply', N_('Multiply')], ['screen', N_('Screen')],
-    'Screen': 'Screen', // ['source-over', N_('Normal')], ['multiply', N_('Multiply')], ['screen', N_('Screen')],
-    'Overlay': 'Overlay', // ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['darken', N_('Darken')], ['lighten', N_('Lighte
-    'Soft light': 'Soft light', // ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['darken', N_('Darken')], ['lighten', N_('Lighte
-    'Darken': 'Darken', // ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['darken', N_('Darken')], ['lighten', N_('Lighte
-    'Lighten': 'Lighten', // ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['darken', N_('Darken')], ['lighten', N_('Lighte
+    'Normal': 'Normal', // ['source-over', N_('Normal')], null,
+    'Darken': 'Darken', // ['darken', N_('Darken')], ['multiply', N_('Multiply')], ['color-burn', N_('Colour burn')], null,
+    'Multiply': 'Multiply', // ['darken', N_('Darken')], ['multiply', N_('Multiply')], ['color-burn', N_('Colour burn')], null,
+    'Colour burn': 'Colour burn', // ['darken', N_('Darken')], ['multiply', N_('Multiply')], ['color-burn', N_('Colour burn')], null,
+    'Lighten': 'Lighten', // ['lighten', N_('Lighten')], ['screen', N_('Screen')], ['color-dodge', N_('Colour dodge')], ['lighter', N_('Lin
+    'Screen': 'Screen', // ['lighten', N_('Lighten')], ['screen', N_('Screen')], ['color-dodge', N_('Colour dodge')], ['lighter', N_('Lin
+    'Colour dodge': 'Colour dodge', // ['lighten', N_('Lighten')], ['screen', N_('Screen')], ['color-dodge', N_('Colour dodge')], ['lighter', N_('Lin
+    'Linear dodge (add)': 'Linear dodge (add)', // ['lighten', N_('Lighten')], ['screen', N_('Screen')], ['color-dodge', N_('Colour dodge')], ['lighter', N_('Lin
+    'Overlay': 'Overlay', // ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['hard-light', N_('Hard light')], null,
+    'Soft light': 'Soft light', // ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['hard-light', N_('Hard light')], null,
+    'Hard light': 'Hard light', // ['overlay', N_('Overlay')], ['soft-light', N_('Soft light')], ['hard-light', N_('Hard light')], null,
+    'Difference': 'Difference', // ['difference', N_('Difference')], ['exclusion', N_('Exclusion')], null,
+    'Exclusion': 'Exclusion', // ['difference', N_('Difference')], ['exclusion', N_('Exclusion')], null,
+    'Hue': 'Hue', // ['hue', N_('Hue')], ['saturation', N_('Saturation')], ['color', N_('Colour')], ['luminosity', N_('Luminosity')
+    'Saturation': 'Saturation', // ['hue', N_('Hue')], ['saturation', N_('Saturation')], ['color', N_('Colour')], ['luminosity', N_('Luminosity')
+    'Colour': 'Colour', // ['hue', N_('Hue')], ['saturation', N_('Saturation')], ['color', N_('Colour')], ['luminosity', N_('Luminosity')
+    'Luminosity': 'Luminosity', // ['hue', N_('Hue')], ['saturation', N_('Saturation')], ['color', N_('Colour')], ['luminosity', N_('Luminosity')
     'Layer': 'Layer', // this.name = name || t('Layer');
     'Base': 'Base', // this.layers = [new Layer(w, h, t('Base'))];
     'Layer {n}': 'Layer {n}', // d.layers.splice(d.active + 1, 0, new Layer(d.w, d.h, name || t('Layer {n}', { n: d.layers.length + 1 })));

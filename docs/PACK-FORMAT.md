@@ -131,16 +131,19 @@ file keeps the names the shop metadata asks for. The build lists both as notes w
 
 ## Textures
 
-A `.ytd` is a texture dictionary. Clothing uses three pixel formats:
+A `.ytd` is a texture dictionary. Clothing uses these pixel formats:
 
 | Format | Notes |
 |---|---|
 | **DXT1** | Compressed, no or on / off transparency. Smallest |
 | **DXT5** | Compressed with smooth transparency |
+| **BC7** | Compressed with smooth transparency, the same size as DXT5 but much closer to the original (newer tools often save it) |
 | **A8R8G8B8** | Uncompressed, lossless, big |
 
 ClothingStudio writes a texture back in its **original format** and regenerates the mip levels. The size stays the same too, unless you
 choose to make the texture bigger when you bring in a bigger image (2×, 4× … up to 4096×4096, see the User guide). The size is stored only
 in the `.ytd`; the `.ymt` just counts a piece's textures. DXT formats are lossy, so
-very smooth photo-like gradients can show slight banding; logos, flat colours and text look great. If you want maximum quality for a
-texture, use A8R8G8B8.
+very smooth photo-like gradients can show slight banding; logos, flat colours and text look great. BC7 is lossy too, but far less. If you
+want maximum quality for a texture, use A8R8G8B8.
+
+Other formats (for example `ATI1` / `ATI2`, used for normal maps) cannot be opened; the error names the format.

@@ -32,7 +32,8 @@ It speaks **11 languages**.
 | | |
 |---|---|
 | <img src="docs/images/text-tool.png" alt="The Text tool" width="520"> | **Text that stays editable.** Click the texture and type. Pick any font installed on your PC (each shown in its own face), size, **bold / italic / underline / strikethrough / ALL CAPS**, alignment, **letter and line spacing**, **outline**, **drop shadow**, **mirror** the text left-right or up-down, **turn** it to any angle. The text is on its own layer marked **T**: click it again later to retype or restyle it. You can also load a font file. |
-| <img src="docs/images/layers.png" alt="The Layers panel" width="260"> | **Layers with big, clear buttons.** New, Duplicate, Up, Down, Lock, Merge, Rename, Delete, each with a picture *and* a word. Eye and padlock on every layer, opacity and blend modes, import an image as a layer or as a see-through guide. A **locked** layer cannot be painted on, moved or deleted by accident. |
+| <img src="docs/images/layers.png" alt="The Layers panel" width="260"> | **Layers with big, clear buttons.** New, Duplicate, Up, Down, Lock, Merge, Rename, Delete, each with a picture *and* a word. Eye and padlock on every layer, opacity, Photoshop's **blend modes** (Multiply, Overlay, Hard light, Colour burn …) and **clipping masks**, import an image as a layer or as a see-through guide. A **locked** layer cannot be painted on, moved or deleted by accident. |
+| | **Fabric look: prints that look printed, not pasted.** One dialog lays the shirt's own **folds and creases** and a **fabric grain** (cotton, jersey knit, denim, canvas, sports mesh, fleece, leather) over your logo, can **bend it along the creases** (like Photoshop's Displace) and set its ink to Multiply, with a live preview on the texture and the 3D model. It all lands as normal layers you can tweak. |
 | <img src="docs/images/color-wheel.png" alt="The colour wheel" width="260"> | **A proper colour wheel** with hue ring and saturation / brightness square, H S B and R G B boxes, hex field, previous colour, recent colours and **screen pick** (grab a colour from anywhere on your screen). |
 | <img src="docs/images/resize-tool.png" alt="The Resize tool" width="520"> | **Resize tool.** Move, scale, rotate and flip any layer, with handles *and* exact numbers, plus Fit / Fill / Stretch. Drop in a logo, size it, done. |
 
@@ -135,9 +136,9 @@ adding a piece and building the resource.
 
 - **Verified by decoding, re-encoding and re-reading real packs, not by loading them in GTA V.** Keep the `.bak` files
   until you have looked at the result in game.
-- Textures are written back in their original format (DXT1, DXT5 or A8R8G8B8, mips regenerated) and size, unless you choose to
+- Textures are written back in their original format (DXT1, DXT5, BC7 or A8R8G8B8, mips regenerated) and size, unless you choose to
   make a texture bigger when you bring in a bigger image (2×, 4× … up to 4096×4096). DXT is compressed, so very smooth
-  photographic gradients can band slightly; logos and flat art look great.
+  photographic gradients can band slightly; logos and flat art look great. BC7 keeps gradients much better than DXT.
 - ClothingStudio edits textures and the pack's bookkeeping files. It does not edit the 3D models themselves.
 - Splitting packs of more than 128 pieces, and the *replace* / AltV layouts, are not done yet. The **single-player** DLC pack is built from
   the layout of the game's own DLCs and verified by reading the archive back, **not by loading it in the game**; keep a backup of your

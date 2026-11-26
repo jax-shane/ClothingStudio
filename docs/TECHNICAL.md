@@ -34,7 +34,8 @@ testable from plain Node (`npm test`). `main.js` only wires dialogs and IPC to t
 |---|---|
 | `main.js`, `preload.js` | Electron shell: window (no application menu, so the page owns every key), file dialogs, IPC, pop-out window, developer smoke-test hooks |
 | `src/lib/rsc.js` | RSC7 resource container: 16-byte header + raw-deflate; system / graphics segments and pointers |
-| `src/lib/ytd.js` | Texture dictionary: read, decode (DXT1 / DXT5 / A8R8G8B8), mip chains, encode, **patch pixels back into the original file**, or **write them at a new size** (`resizeTexture`) |
+| `src/lib/ytd.js` | Texture dictionary: read, decode (DXT1 / DXT5 / BC7 / A8R8G8B8), mip chains, encode, **patch pixels back into the original file**, or **write them at a new size** (`resizeTexture`) |
+| `src/lib/bc7.js` | BC7 blocks: decode all eight modes, encode with modes 6 and 5 |
 | `src/lib/ydd.js` | Drawable dictionary reader: positions, normals, UVs, indices |
 | `src/lib/ymt.js` + `ymt_types.json` | `CPedVariationInfo` ped-variation `.ymt` (a "Meta" resource): read, normalise, write byte-compatibly; insert / remove / move drawables; options |
 | `src/lib/rbf.js` | RBF0 binary XML, used by the creature metadata file |
@@ -46,7 +47,8 @@ testable from plain Node (`npm test`). `main.js` only wires dialogs and IPC to t
 | `src/lib/rpfwrite.js` | writes unencrypted RPF7 archives (`writeRpf`): table, names, resources and nested archives |
 | `src/lib/spbuild.js` | **Build → Single player**: the FiveM resource converted into `dlc.rpf` (content.xml, setup2.xml, metadata, `x64\models\cdimages` archives) and its install text |
 | `src/lib/rpf.js`, `gtakeys.js`, `body.js`, `body-worker.js`, `skeleton.js` | the optional mannequin: reads the user's own GTA V archives |
-| `renderer/js/paint.js` | the paint engine (layers, tools, undo, transforms, live text, changing a document's resolution) |
+| `renderer/js/paint.js` | the paint engine (layers with blend modes and clipping masks, tools, undo, transforms, live text, changing a document's resolution, the live preview layers of Fabric look) |
+| `renderer/js/fabric.js` | the maps of **Fabric look** (pure functions, no page): folds from a texture (`foldsMap`: a high-pass of the brightness, levelled), fabric grains (`grainMap`), bending a layer along the folds (`bend`, a displacement with premultiplied bilinear sampling) |
 | `renderer/js/texsize.js` | which bigger texture sizes the "this image is bigger than the texture" questions offer (pure functions) |
 | `renderer/js/app.js` | the UI: Pack list, layers panel, options bar, colour wheel, text editor, dialogs |
 | `renderer/js/viewer.js` | three.js scene, orbit camera, live texture, mannequin, pop-out sync |
@@ -69,6 +71,15 @@ All of this is re-implemented in JavaScript from the layouts documented by [Code
   pixels and mip chain back into the *original file's* structure (size, format and every header field untouched), then **re-reads and
   verifies** the result before it replaces the file. DXT1 is encoded with an alpha-aware block fitter (on/off transparency is
   verified); DXT5 keeps smooth alpha; A8R8G8B8 is lossless.
+- **BC7** (`bc7.js`, format `0x20374342` = "BC7 "): 16 bytes per 4×4 block like DXT5. The decoder handles all eight modes (partitions into
+  two or three subsets, p-bits, rotation, separate colour / alpha indices; a block without a mode bit is transparent black) with the
+  partition and anchor tables of the Direct3D 11 format. It was compared with a graphics card's own BC7 decoder (Direct3D 11 through
+  WebGL2's `EXT_texture_compression_bptc` in Electron): 589 824 random blocks, 65 536 for each mode and the reserved one, plus random and
+  encoded blocks, decoded identically; a few of them are in `test/bc7.test.js` as known answers. The encoder writes **mode 6** (one RGBA
+  line with 16 steps per block, endpoints from the main axis of the 16 pixels then refined by least squares, p-bits chosen per endpoint) and,
+  for a block whose alpha varies, also tries **mode 5** (colour and alpha on separate lines, alpha ends exact) and keeps the one that keeps
+  more fully opaque / fully transparent pixels exactly so, then the closer one. A block of one colour comes back exactly (two endpoints
+  either side of a value and weight 30 hit it). About 1.2 s for a 2048² texture with its mips.
 - **Changing a texture's size** (`ytd.resizeTexture`). The size is in the file, so this builds a new inflated image instead of patching:
   the system segment byte for byte as it was except this texture's header (width, height, stride scaled with the width, mip count),
   followed by one graphics page that holds the new mip chain. The page is laid out like the one in the bundled template: the smallest
@@ -187,7 +198,9 @@ packs from the blank texture template in `src/lib/assets/`, with stand-in `.ydd`
 |---|---|
 | `rbf-creature.test.js` | RBF round trip; the creature-metadata rules |
 | `ymt.test.js` | model creation, insert / remove / move, options, write / read, byte-identical rebuild, compare / sync |
-| `ytd.test.js` | reading the template, formats, patch round-trip, `.bak`, DXT1 alpha verification; changing a texture's size (page layout, only the header changes, every format, refusals) |
+| `ytd.test.js` | reading the template, formats, patch round-trip, `.bak`, DXT1 alpha verification; changing a texture's size (page layout, only the header changes, every format, refusals); BC7 files: open, save in place, change size |
+| `bc7.test.js` | BC7 blocks of every mode decode as a graphics card decoded them; encoder: exact flat colours, opaque / transparent pixels kept, better than DXT5, odd sizes |
+| `fabric.test.js` | Fabric look maps: plain grey for an even texture, a crease comes out dark whatever the cloth's colour, faint creases levelled up; every grain is grey around 128, repeatable, coarser at a bigger size; bending moves a print by the map's share of the amount, keeps see-through see-through and tints clean |
 | `pack.test.js` | name parsing, scanning, empty new pack |
 | `packops-pieces.test.js` | create pack, add / move / delete pieces and textures (also at another size than the pack's), options, skin renaming, rollback |
 | `lastdirs.test.js` | file dialogs reopening in the folder they were last used in |

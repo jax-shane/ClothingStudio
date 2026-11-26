@@ -16,7 +16,7 @@
     "dev": "node dev-server.js",
     "test": "node --test",
     "i18n": "node tools/i18n.js check",
-    "package": "electron-packager . ClothingStudio --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/dist\" --ignore=\"^/test\" --ignore=\"^/docs\" --ignore=\"^/tools\" --ignore=\"^/.github\" --ignore=\"^/dev-server.js\" --ignore=\"^/renderer/lang/pseudo\\.js$\""
+    "package": "electron-packager . ClothingStudio --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/dist\" --ignore=\"^/release\" --ignore=\"^/test\" --ignore=\"^/docs\" --ignore=\"^/tools\" --ignore=\"^/.github\" --ignore=\"^/dev-server.js\" --ignore=\"^/renderer/lang/pseudo\\.js$\""
   },
   "dependencies": {
     "three": "^0.187.0"

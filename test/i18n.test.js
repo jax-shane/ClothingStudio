@@ -160,7 +160,8 @@ describe('the catalog (renderer/lang/en.js)', () => {
   it('every t() / tn() / nt() / T() call in the code has a plain text (or is one of the known tables)', () => {
     const { dynamic } = tools.extract();
     const known = [/t\(message\)/, /t\(label\)/, /t\(b\[1\]\)/, /t\(S\.emptyMsg\)/, /t\(FLAG_HINTS\[name\]\)/, /t\(group\)/, /t\(NAMES\[/, /t\(\)/,
-      /t\(KEY_NAME\[k\]\)/, /t\(g\.name\)/, /t\(s\.text\)/, /t\(p\.m\)/];                    // the tables of the keyboard shortcuts (app.js)
+      /t\(KEY_NAME\[k\]\)/, /t\(g\.name\)/, /t\(s\.text\)/, /t\(p\.m\)/,                     // the tables of the keyboard shortcuts (app.js)
+      /t\(GRAIN_LABELS\[/];                                                                   // the fabric names of the Fabric look dialog (app.js)
     const unknown = dynamic.filter((d) => !known.some((r) => r.test(d)));
     assert.deepEqual(unknown, [], 'a text for the user must be a plain string so that it can be translated; see docs/TRANSLATING.md');
   });

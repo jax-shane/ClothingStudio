@@ -100,6 +100,7 @@ describe('memory estimate', () => {
     assert.equal(T.mbText(T.memoryMB(2048, 2048, 'DXT1')), '2.7 MB');
     assert.equal(T.mbText(T.memoryMB(4096, 4096, 'DXT1')), '11 MB');
     assert.equal(T.mbText(T.memoryMB(4096, 4096, 'DXT5')), '21 MB');
+    assert.equal(T.mbText(T.memoryMB(4096, 4096, 'BC7')), '21 MB', 'BC7 takes a byte per pixel, like DXT5');
     assert.equal(T.mbText(T.memoryMB(1024, 1024, 'A8R8G8B8')), '5.3 MB');
   });
 });
