@@ -94,16 +94,56 @@ write standard ones for a new resource. Some packs add other `.meta` files that 
 `first_person_alternates_*.meta` and `pedalternativevariations_*.meta`. After moving or deleting pieces the app tells you if your
 pack has them so you can check the numbers by hand.
 
+## Single-player (`dlc.rpf`)
+
+**Build → Single player** turns the clean FiveM resource into a DLC pack for story mode. The layout is the one of the game's own clothing
+DLCs (read from an installed game while this was written):
+
+```
+<name>\                                    a folder named after the pack, in lower case
+  dlc.rpf                                  the pack
+  INSTALL.txt                              the install steps
+dlc.rpf
+  content.xml, setup2.xml                  what the pack is and what to switch on (the change set <NAME>_AUTOGEN)
+  common\data\mp_m_freemode_01_<name>.meta the shop metadata: the same files a FiveM resource has (and the female one)
+  common\data\effects\peds\first_person_alternates_*.meta    only when the pack has them
+  common\data\pedalternativevariations_*.meta                only when the pack has them
+  x64\anim\creaturemetadata.rpf            heels / hair scale data, only when a piece uses them (mp_creaturemetadata_<m|f>_<name>.ymt)
+  x64\models\cdimages\<name>_male.rpf      mp_m_freemode_01_<name>.ymt and the folder mp_m_freemode_01_<name>\ with the .ydd and .ytd files
+  x64\models\cdimages\<name>_male_p.rpf    the props: the folder mp_m_freemode_01_p_<name>\
+  (and the same for _female)
+```
+
+A FiveM stream file is called `<dictionary>^<file>`; inside an archive the dictionary is the folder and the file keeps the part after the
+`^`: `mp_m_freemode_01_my^jbib_000_u.ydd` becomes `mp_m_freemode_01_my\jbib_000_u.ydd`. The archives are written **unencrypted** (RPF7,
+"OPEN"), which the game reads like any other.
+
+To install: copy the folder into `<your GTA V folder>\mods\update\x64\dlcpacks\` (OpenIV's *mods* folder) and add
+`<Item>dlcpacks:/<name>/</Item>` after the last `<Item>` of `update\update.rpf\common\data\dlclist.xml` (put a copy of that file in
+`mods\update\update.rpf\common\data\` first; OpenIV does it when you edit the file there). The clothes belong to the multiplayer freemode
+characters, so a trainer or menu mod is needed to switch the player to one.
+
+What is checked, and what is not: the archive writer reproduces the structure of the game's own archives (it was tested by reading real
+ones, writing them again and comparing every entry, resource flag and table position), and `dlc.rpf` is read back by the same reader in
+the tests. The game itself loading the pack is **not** checked: it has not been tried in game. Two details are the least certain: the
+first-person-alternate and alternate-variation `.meta` files are registered the same way as the shop metadata, and the creature metadata
+file keeps the names the shop metadata asks for. The build lists both as notes when it uses them.
+
 ## Textures
 
-A `.ytd` is a texture dictionary. Clothing uses three pixel formats:
+A `.ytd` is a texture dictionary. Clothing uses these pixel formats:
 
 | Format | Notes |
 |---|---|
 | **DXT1** | Compressed, no or on / off transparency. Smallest |
 | **DXT5** | Compressed with smooth transparency |
+| **BC7** | Compressed with smooth transparency, the same size as DXT5 but much closer to the original (newer tools often save it) |
 | **A8R8G8B8** | Uncompressed, lossless, big |
 
-ClothingStudio writes a texture back in its **original size and format** and regenerates the mip levels. DXT formats are lossy, so
-very smooth photo-like gradients can show slight banding; logos, flat colours and text look great. If you want maximum quality for a
-texture, use A8R8G8B8.
+ClothingStudio writes a texture back in its **original format** and regenerates the mip levels. The size stays the same too, unless you
+choose to make the texture bigger when you bring in a bigger image (2×, 4× … up to 4096×4096, see the User guide). The size is stored only
+in the `.ytd`; the `.ymt` just counts a piece's textures. DXT formats are lossy, so
+very smooth photo-like gradients can show slight banding; logos, flat colours and text look great. BC7 is lossy too, but far less. If you
+want maximum quality for a texture, use A8R8G8B8.
+
+Other formats (for example `ATI1` / `ATI2`, used for normal maps) cannot be opened; the error names the format.

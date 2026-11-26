@@ -40,7 +40,12 @@ const routes = {
   texture: (b) => ytd.decodeTexture(ytd.readYtd(b.path), 0),
   save: (b) => {
     if (!ALLOW_WRITE) throw new Error('dev server is read-only (start with --allow-write)');
-    return ytd.patchTexture(b.path, 0, Buffer.from(b.rgba, 'base64'));
+    const px = Buffer.from(b.rgba, 'base64');
+    if (b.width && b.height) {                                   // same as main.js: a painting with a new size rewrites the .ytd at that size
+      const cur = ytd.readYtd(b.path).textures[0];
+      if (Number(b.width) !== cur.width || Number(b.height) !== cur.height) return ytd.resizeTexture(b.path, 0, Number(b.width), Number(b.height), px);
+    }
+    return ytd.patchTexture(b.path, 0, px);
   },
 };
 

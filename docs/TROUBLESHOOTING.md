@@ -53,6 +53,11 @@ They cannot apply: **Up** is grey on the top layer, **Down** and **Merge** on th
 **I can't paint on a layer.**
 It is probably **locked** (padlock) or **hidden** (eye). The status line says so.
 
+**"unsupported texture format …" when you click a texture.**
+The `.ytd` uses a pixel format ClothingStudio cannot read. DXT1, DXT5, BC7 and A8R8G8B8 work (BC7, `0x20374342`, needs a version newer
+than 0.2.1). Others, such as `ATI1` / `ATI2` (mostly normal maps), do not yet. You can convert the texture to DXT5 or BC7 in OpenIV, a
+texture toolkit or CodeWalker and open it again.
+
 **Paint doesn't show on the model.**
 Check you are editing the texture that piece actually uses (the highlighted letter), and that the layer is visible and has some
 opacity. For props such as hats the model is shown on the head.
@@ -65,8 +70,8 @@ or server) and try again. The app never writes half a file: the new texture is v
 
 **It looks different or blocky in game.**
 DXT1 and DXT5 are compressed formats and the app has to compress your painting back into them. Flat colours, logos and text are
-fine; smooth photographic gradients can band. If the texture is **A8R8G8B8** nothing is lost. A texture can only be saved in the
-format and size it already has.
+fine; smooth photographic gradients can band. **BC7** is compressed too but keeps far more. If the texture is **A8R8G8B8** nothing is
+lost. A texture can only be saved in the format and size it already has.
 
 **I saved, but nothing changes in game.**
 `refresh`, then `restart <your resource>` on the server, or restart the server. FiveM clients may keep a cache: rejoining or
@@ -107,6 +112,27 @@ The model's name does not say what it is. Pick the category (badge, hat, pants �
 **My `.meta` still lists the old numbers.**
 The app does not edit `.meta` files, and warns you after a move or delete if your pack has ones that list pieces by number
 (`first_person_alternates_*.meta`, `pedalternativevariations_*.meta`). Edit those by hand.
+
+## Single player
+
+**The clothes do not show up in single player.**
+The single-player pack is built from the layout of the game's own clothing DLCs but has **not been tried in game yet**, so this can happen.
+Check, in this order: the folder is in `<GTA V>\mods\update\x64\dlcpacks\<name>\` and holds `dlc.rpf`; the line `<Item>dlcpacks:/<name>/</Item>`
+is in the `dlclist.xml` that is in `mods\update\update.rpf\common\data\` (not only in the original) and the name matches the folder
+exactly; you are playing as a freemode character (`mp_m_freemode_01` / `mp_f_freemode_01`), because story-mode characters do not use these
+clothes, which needs a trainer or menu mod; OpenIV's *mods* folder is set up. If the game crashes at the start, remove the `dlclist.xml` line
+and the folder, restore your backup, and please [open an issue](../CONTRIBUTING.md) with the build's notes.
+
+**Build says the name is not allowed / the folder is not empty.**
+The name is letters, digits and underscores only (up to 40 characters) and is written in lower case. The output folder must not exist or must be
+empty, and must not be inside the pack you are building from.
+
+## Language
+
+**The program is in the wrong language.**
+Press the **🌐** button at the top right and choose one (or **Automatic** to follow your PC). **A text is in English although I chose another
+language.** That text has no translation yet; see [Translating](TRANSLATING.md) to add it. **A translation is wrong or odd.** The translations were made by
+machine; fix the line in `renderer/lang/<code>.js` (one text per line) and send it along.
 
 ## The 3D view
 

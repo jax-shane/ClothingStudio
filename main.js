@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
@@ -10,8 +10,32 @@ const packops = require('./src/lib/packops');
 const { readYdd } = require('./src/lib/ydd');
 const ytd = require('./src/lib/ytd');
 const { detectGtaDir } = require('./src/lib/body');
+const { lastDirs } = require('./src/lib/lastdirs');
+const spbuild = require('./src/lib/spbuild');
 
 let win = null;
+
+// ---- language of the native dialogs and of the error messages (the editor picks the language, see renderer/js/i18n.js)
+// A language file is renderer/lang/<code>.js: `export default { name, dir, strings }`. main.js is CommonJS, so the file is read as
+// text and its object evaluated. nt('English text') / T('English text') give the text in that language (English when it has none).
+const LANG_CODE = /^[a-z]{2,3}(-[a-z]{2,4})?$/i;
+let mainStrings = Object.create(null);
+function loadMainLanguage(code) {
+  mainStrings = Object.create(null);
+  if (!code || String(code).toLowerCase() === 'en' || !LANG_CODE.test(code)) return false;
+  try {
+    const src = fs.readFileSync(path.join(__dirname, 'renderer', 'lang', String(code).toLowerCase() + '.js'), 'utf8').replace(/^﻿/, '');
+    const m = /export\s+default\s*/.exec(src);
+    const data = new Function('return (' + src.slice(m.index + m[0].length).replace(/;\s*$/, '') + ');')();   // our own file, plain data
+    mainStrings = Object.assign(Object.create(null), data.strings);
+    return true;
+  } catch { return false; }
+}
+const nt = (key, params) => {
+  const v = mainStrings[key], s = typeof v === 'string' && v ? v : key;
+  return params ? s.replace(/\{(\w+)\}/g, (m, k) => (params[k] === undefined ? m : String(params[k]))) : s;
+};
+const T = nt;
 
 // ---- settings (GTA folder) -------------------------------------------------
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
@@ -21,6 +45,9 @@ function readSettings() {
 function writeSettings(s) {
   try { fs.mkdirSync(path.dirname(settingsFile()), { recursive: true }); fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 1)); } catch { /* not fatal */ }
 }
+
+// ---- remembered folders: each kind of file dialog reopens where it was last used (settings.json -> lastDirs; see src/lib/lastdirs.js)
+const { rememberDir, startIn } = lastDirs({ read: readSettings, write: writeSettings });
 
 // ---- body mannequin: archive reading runs in a worker so the window stays responsive
 let bodyWorker = null, bodyReq = 0;
@@ -48,7 +75,7 @@ function inside(p) {
     const rel = path.relative(root, full);
     if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return full;
   }
-  throw new Error('That file is outside the opened pack.');
+  throw new Error(T('That file is outside the opened pack.'));
 }
 
 function register(root) {
@@ -74,8 +101,8 @@ function createWindow() {
     win.webContents.executeJavaScript('window.csDirty ? window.csDirty() : false').then((dirty) => {
       if (!dirty) return quit();
       const r = dialog.showMessageBoxSync(win, {
-        type: 'warning', buttons: ['Discard painting and quit', 'Cancel'], defaultId: 1, cancelId: 1,
-        message: 'You have painting that is not saved to a .ytd or a layers file.',
+        type: 'warning', buttons: [nt('Discard painting and quit'), nt('Cancel')], defaultId: 1, cancelId: 1,
+        message: nt('You have painting that is not saved to a .ytd or a layers file.'),
       });
       if (r === 0) quit();
     }).catch(quit);
@@ -101,7 +128,7 @@ function openPopout() {
     x: wa.x + (other ? 0 : 60), y: wa.y + (other ? 0 : 60),
     width: other ? wa.width : Math.max(640, Math.min(1100, wa.width - 120)),
     height: other ? wa.height : Math.max(480, Math.min(860, wa.height - 120)),
-    minWidth: 480, minHeight: 360, backgroundColor: '#0d0f12', title: 'ClothingStudio - 3D view',
+    minWidth: 480, minHeight: 360, backgroundColor: '#0d0f12', title: nt('ClothingStudio - 3D view'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   pop.setMenuBarVisibility(false);
@@ -121,6 +148,20 @@ ipcMain.handle('win:fullscreen', (e, on) => {
   return !!on;
 });
 
+// The language: the editor asks what was chosen (and what the system uses), tells this process which one it shows, and the user
+// can change it. `remember` false = the editor picked it by itself from the system language: used for this run, not saved.
+ipcMain.handle('lang:get', () => ({
+  saved: process.env.CS_SMOKE_OUT ? 'en' : readSettings().language || null,         // the smoke tests (below) look for English texts
+  system: [app.getLocale(), ...(app.getPreferredSystemLanguages ? app.getPreferredSystemLanguages() : [])].filter(Boolean),
+}));
+ipcMain.handle('lang:set', (_e, code, remember) => {
+  const c = code ? String(code) : '';
+  if (c && !LANG_CODE.test(c)) throw new Error('That is not a language code.');
+  if (remember) { const s = readSettings(); if (c) s.language = c; else delete s.language; writeSettings(s); }
+  loadMainLanguage(c);
+  return true;
+});
+
 ipcMain.handle('viewer:open', () => openPopout());
 ipcMain.handle('viewer:close', () => { if (pop && !pop.isDestroyed()) pop.close(); });
 ipcMain.on('viewer:send', (e, msg) => {
@@ -129,10 +170,11 @@ ipcMain.on('viewer:send', (e, msg) => {
 
 ipcMain.handle('pack:open', async () => {
   const r = await dialog.showOpenDialog(win, {
-    title: 'Choose a clothing resource folder (the one that contains stream/)',
-    properties: ['openDirectory'],
+    title: nt('Choose a clothing resource folder (the one that contains stream/)'),
+    properties: ['openDirectory'], ...startIn('pack'),
   });
   if (r.canceled || !r.filePaths[0]) return null;
+  rememberDir('pack', path.dirname(r.filePaths[0]));   // reopen beside this pack, so the other packs are listed
   return openPackFolder(r.filePaths[0]);
 });
 
@@ -145,7 +187,7 @@ const mayImport = (p) => droppedPaths.has(path.resolve(String(p))) || inOpenedPa
 
 ipcMain.handle('pack:scan', (_e, folder) => {
   const full = path.resolve(String(folder));
-  if (!allowedRoots.has(full) && !droppedPaths.has(full)) throw new Error('Open a pack with "Open pack…" or drop its folder on the window.');
+  if (!allowedRoots.has(full) && !droppedPaths.has(full)) throw new Error(T('Open a pack with "Open pack…" or drop its folder on the window.'));
   return openPackFolder(full);
 });
 
@@ -165,8 +207,13 @@ ipcMain.handle('tex:load', (_e, file) => ytd.decodeTexture(ytd.readYtd(inside(fi
 
 ipcMain.handle('tex:save', (_e, file, rgba, opts) => {
   const full = inside(file);
-  if (!full.toLowerCase().endsWith('.ytd')) throw new Error('Not a .ytd file.');
-  return ytd.patchTexture(full, 0, Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { backup: !(opts && opts.backup === false) });
+  if (!full.toLowerCase().endsWith('.ytd')) throw new Error(T('Not a .ytd file.'));
+  const px = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), o = { backup: !(opts && opts.backup === false) };
+  if (opts && opts.width && opts.height) {                    // the painting was given another size (Import image -> resize the texture): the .ytd is rewritten at that size
+    const cur = ytd.readYtd(full).textures[0];
+    if (Number(opts.width) !== cur.width || Number(opts.height) !== cur.height) return ytd.resizeTexture(full, 0, Number(opts.width), Number(opts.height), px, o);
+  }
+  return ytd.patchTexture(full, 0, px, o);
 });
 
 // New texture variant: copy a variant's .ytd to the next free letter (a -> b -> c ...) next to it.
@@ -174,7 +221,7 @@ ipcMain.handle('tex:save', (_e, file, rgba, opts) => {
 ipcMain.handle('variant:add', (_e, srcYtd, usedLetters) => {
   const full = inside(srcYtd);
   const p = parseName(full);
-  if (!p || p.type !== 'ytd') throw new Error('That is not a clothing texture this app recognises.');
+  if (!p || p.type !== 'ytd') throw new Error(T('That is not a clothing texture this app recognises.'));
   const dir = path.dirname(full), base = path.basename(full);
   const used = new Set((Array.isArray(usedLetters) ? usedLetters : []).map((l) => String(l).toLowerCase()));
   for (const n of fs.readdirSync(dir)) { // letters already on disk beside the source also count
@@ -183,10 +230,10 @@ ipcMain.handle('variant:add', (_e, srcYtd, usedLetters) => {
   }
   used.add(p.letter);
   const top = Math.max(...[...used].map((l) => l.charCodeAt(0)));
-  if (top >= 'z'.charCodeAt(0)) throw new Error('There are no letters left after z for this piece.');
+  if (top >= 'z'.charCodeAt(0)) throw new Error(T('There are no letters left after z for this piece.'));
   const letter = String.fromCharCode(top + 1);
   const m = (p.prop ? /^(.*_diff_\d{3}_)([a-z])(\.ytd)$/i : /^(.*_diff_\d{3}_)([a-z])(_[a-z]{3}\.ytd)$/i).exec(base);
-  if (!m) throw new Error('Could not work out the new file name from ' + base);
+  if (!m) throw new Error(T('Could not work out the new file name from {file}', { file: base }));
   const target = path.join(dir, m[1] + letter + m[3]);
   fs.copyFileSync(full, target, fs.constants.COPYFILE_EXCL); // never overwrites an existing file
   return { file: target, letter, race: p.race || null };
@@ -198,24 +245,24 @@ ipcMain.handle('variant:add', (_e, srcYtd, usedLetters) => {
 ipcMain.handle('variant:delete', async (_e, ytdPath) => {
   const full = inside(ytdPath);
   const p = parseName(full);
-  if (!p || p.type !== 'ytd') throw new Error('That is not a clothing texture this app recognises.');
-  if (!fs.existsSync(full)) throw new Error('That file is already gone.');
+  if (!p || p.type !== 'ytd') throw new Error(T('That is not a clothing texture this app recognises.'));
+  if (!fs.existsSync(full)) throw new Error(T('That file is already gone.'));
   const dir = path.dirname(full), base = path.basename(full);
   const same = (q) => q && q.type === 'ytd' && q.gender === p.gender && q.prop === p.prop && q.comp === p.comp && q.drawable === p.drawable && (q.race || null) === (p.race || null);
   const nameFor = (letter) => {
     const m = (p.prop ? /^(.*_diff_\d{3}_)([a-z])(\.ytd)$/i : /^(.*_diff_\d{3}_)([a-z])(_[a-z]{3}\.ytd)$/i).exec(base);
-    if (!m) throw new Error('Could not work out the file name for texture ' + letter);
+    if (!m) throw new Error(T('Could not work out the file name for texture {letter}', { letter }));
     return path.join(dir, m[1] + letter + m[3]);
   };
   const letters = new Set([p.letter]);
   for (const n of fs.readdirSync(dir)) { const q = parseName(path.join(dir, n)); if (same(q)) letters.add(q.letter); }
-  if (letters.size < 2) throw new Error('A piece needs at least one texture, so its only texture cannot be deleted.');
+  if (letters.size < 2) throw new Error(T('A piece needs at least one texture, so its only texture cannot be deleted.'));
 
   const order = [...letters].sort();
   const at = order.indexOf(p.letter);
   const moves = order.slice(at + 1).map((from, i) => ({ from: nameFor(from), to: nameFor(order[at + i]), letter: order[at + i] }));
   for (const m of moves) { // every file that has to move must exist, and every slot must be free once the chain runs
-    if (!fs.existsSync(m.from)) throw new Error('Expected ' + path.basename(m.from) + ' but it is missing; nothing was changed.');
+    if (!fs.existsSync(m.from)) throw new Error(T('Expected {file} but it is missing; nothing was changed.', { file: path.basename(m.from) }));
   }
   // The file goes to the Recycle Bin under its real name; a temp copy makes the whole thing undoable if a later rename fails.
   const doomed = [full, full + '.bak'].filter((f) => fs.existsSync(f));
@@ -226,7 +273,7 @@ ipcMain.handle('variant:delete', async (_e, ytdPath) => {
   try {
     for (const { f } of backups) { await shell.trashItem(f); trashed.push(f); }
     for (const m of moves) {                   // ascending, so each target slot has just been freed
-      if (fs.existsSync(m.to)) throw new Error('Cannot move ' + path.basename(m.from) + ' because ' + path.basename(m.to) + ' is in the way.');
+      if (fs.existsSync(m.to)) throw new Error(T('Cannot move {from} because {to} is in the way.', { from: path.basename(m.from), to: path.basename(m.to) }));
       fs.renameSync(m.from, m.to); done.push([m.from, m.to]);
       if (fs.existsSync(m.from + '.bak') && !fs.existsSync(m.to + '.bak')) { fs.renameSync(m.from + '.bak', m.to + '.bak'); done.push([m.from + '.bak', m.to + '.bak']); }
       renames.push(m);
@@ -244,35 +291,45 @@ ipcMain.handle('variant:delete', async (_e, ytdPath) => {
 const picked = new Map();
 let pickSeq = 0;
 const regPick = (p) => { const t = 'f' + (++pickSeq); picked.set(t, p); return t; };
-const resolvePick = (t) => { const p = picked.get(t); if (!p || !fs.existsSync(p)) throw new Error('That file is no longer available - pick it again.'); return p; };
-const openedPack = (root) => { const full = path.resolve(String(root)); if (!allowedRoots.has(full)) throw new Error('That folder is not an opened pack.'); return full; };
+const resolvePick = (t) => { const p = picked.get(t); if (!p || !fs.existsSync(p)) throw new Error(T('That file is no longer available - pick it again.')); return p; };
+const openedPack = (root) => { const full = path.resolve(String(root)); if (!allowedRoots.has(full)) throw new Error(T('That folder is not an opened pack.')); return full; };
 const IMG_EXT = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'];
 
 const yddInfo = (p) => ({ token: regPick(p), ...packops.guessYdd(p) });
 
 ipcMain.handle('ydd:pick', async () => {
-  const r = await dialog.showOpenDialog(win, { title: 'Choose the .ydd model(s) to add', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Drawable models', extensions: ['ydd'] }] });
-  return r.canceled ? [] : r.filePaths.map(yddInfo);
+  const r = await dialog.showOpenDialog(win, { title: nt('Choose the .ydd model(s) to add'), properties: ['openFile', 'multiSelections'], filters: [{ name: nt('Drawable models'), extensions: ['ydd'] }], ...startIn('import') });
+  if (r.canceled || !r.filePaths.length) return [];
+  rememberDir('import', path.dirname(r.filePaths[0]));
+  return r.filePaths.map(yddInfo);
 });
 ipcMain.handle('ydd:register', (_e, paths) => (Array.isArray(paths) ? paths : []).filter((p) => /\.ydd$/i.test(String(p)) && fs.existsSync(p) && mayImport(p)).map(yddInfo));
 
 ipcMain.handle('tex:pick', async () => {
   const r = await dialog.showOpenDialog(win, {
-    title: 'Choose textures (PNG, JPG, WEBP... or a ready .ytd)', properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Textures', extensions: [...IMG_EXT, 'ytd'] }],
+    title: nt('Choose textures (PNG, JPG, WEBP... or a ready .ytd)'), properties: ['openFile', 'multiSelections'],
+    filters: [{ name: nt('Textures'), extensions: [...IMG_EXT, 'ytd'] }], ...startIn('import'),
   });
-  return r.canceled ? [] : r.filePaths.map((p) => ({ token: regPick(p), name: path.basename(p), kind: /\.ytd$/i.test(p) ? 'ytd' : 'image' }));
+  if (r.canceled || !r.filePaths.length) return [];
+  rememberDir('import', path.dirname(r.filePaths[0]));
+  return r.filePaths.map((p) => ({ token: regPick(p), name: path.basename(p), kind: /\.ytd$/i.test(p) ? 'ytd' : 'image' }));
 });
 ipcMain.handle('tex:register', (_e, paths) => (Array.isArray(paths) ? paths : [])
   .filter((p) => new RegExp(`\\.(${[...IMG_EXT, 'ytd'].join('|')})$`, 'i').test(String(p)) && fs.existsSync(p) && mayImport(p))
   .map((p) => ({ token: regPick(p), name: path.basename(p), kind: /\.ytd$/i.test(p) ? 'ytd' : 'image' })));
 ipcMain.handle('file:dataUrl', (_e, token) => {
   const f = resolvePick(token), ext = path.extname(f).slice(1).toLowerCase().replace('jpg', 'jpeg');
-  if (!IMG_EXT.includes(ext.replace('jpeg', 'jpg'))) throw new Error('Not an image file.');
+  if (!IMG_EXT.includes(ext.replace('jpeg', 'jpg'))) throw new Error(T('Not an image file.'));
   return `data:image/${ext};base64,` + fs.readFileSync(f).toString('base64');
 });
 
-const resolveTextures = (list) => (list || []).map((t) => (t.kind === 'ytd' ? { kind: 'ytd', path: resolvePick(t.token) } : t));
+// kind 'ytd': a file the user picked (by token); kind 'copy': a texture of the opened pack itself, copied to another piece
+const packYtd = (p) => {
+  const full = inside(p);
+  if (!full.toLowerCase().endsWith('.ytd') || !fs.existsSync(full)) throw new Error(T('That file is no longer available - pick it again.'));
+  return full;
+};
+const resolveTextures = (list) => (list || []).map((t) => (t.kind === 'ytd' ? { kind: 'ytd', path: resolvePick(t.token) } : t.kind === 'copy' ? { kind: 'ytd', path: packYtd(t.ytd) } : t));
 
 ipcMain.handle('piece:template', (_e, root, gender, prop, comp, itemId) => {
   const pack = scanPack(openedPack(root));
@@ -296,26 +353,35 @@ ipcMain.handle('piece:delete', (_e, root, itemId) => packops.deletePiece(openedP
 ipcMain.handle('piece:move', (_e, root, itemId, to) => packops.movePiece(openedPack(root), itemId, to));
 
 ipcMain.handle('pack:new', async (_e, name) => {
-  if (!packops.validName(name)) throw new Error('Use letters, digits and underscores only (for example my_clothes), up to 40 characters.');
-  const r = await dialog.showOpenDialog(win, { title: `Where should the "${name}" folder be created?`, properties: ['openDirectory', 'createDirectory'] });
+  if (!packops.validName(name)) throw new Error(T('Use letters, digits and underscores only (for example my_clothes), up to 40 characters.'));
+  const r = await dialog.showOpenDialog(win, { title: nt('Where should the "{name}" folder be created?', { name }), properties: ['openDirectory', 'createDirectory'], ...startIn('pack') });
   if (r.canceled || !r.filePaths[0]) return null;
+  rememberDir('pack', r.filePaths[0]);
   const made = packops.createPack(r.filePaths[0], name);
   register(made.root);
   return scanPack(made.root);
 });
 
-ipcMain.handle('pack:build', async (_e, root, name) => {
+// target: 'fivem' (default) writes a FiveM resource folder, 'sp' a single-player DLC pack (dlc.rpf)
+ipcMain.handle('pack:build', async (_e, root, name, target) => {
   const full = openedPack(root);
-  if (!packops.validName(name)) throw new Error('Use letters, digits and underscores only for the resource name (up to 40 characters).');
-  const r = await dialog.showOpenDialog(win, { title: 'Choose the folder to build the FiveM resource into (a folder named after the resource is created inside it)', properties: ['openDirectory', 'createDirectory'] });
+  const sp = target === 'sp';
+  if (!packops.validName(name)) throw new Error(T('Use letters, digits and underscores only for the resource name (up to 40 characters).'));
+  const r = await dialog.showOpenDialog(win, {
+    title: sp ? nt('Choose the folder to build the single-player pack into (a folder named after the pack is created inside it)')
+      : nt('Choose the folder to build the FiveM resource into (a folder named after the resource is created inside it)'),
+    properties: ['openDirectory', 'createDirectory'], ...startIn('build'),
+  });
   if (r.canceled || !r.filePaths[0]) return null;
+  rememberDir('build', r.filePaths[0]);
+  if (sp) return spbuild.buildSinglePlayer(full, path.join(r.filePaths[0], name.toLowerCase()), name);
   return packops.buildResource(full, path.join(r.filePaths[0], name), name);
 });
 
 // ---- the pack's ped variation .ymt (how many textures the game offers for each piece)
 function packYmts(root) {
   const full = path.resolve(String(root));
-  if (!allowedRoots.has(full)) throw new Error('That folder is not an opened pack.');
+  if (!allowedRoots.has(full)) throw new Error(T('That folder is not an opened pack.'));
   const pack = scanPack(full);
   // the same lookup the piece operations use, so the chip and the edits always talk about the same file
   return ['male', 'female'].map((gender) => ({ gender, file: packops.findYmt(full, pack.dlcName, gender), items: pack.items.filter((i) => i.gender === gender) }));
@@ -355,12 +421,12 @@ ipcMain.handle('body:status', () => ({ gtaDir: detectGtaDir(readSettings().gtaDi
 
 ipcMain.handle('body:setDir', async () => {
   const r = await dialog.showOpenDialog(win, {
-    title: 'Choose your Grand Theft Auto V folder (contains GTA5.exe)', properties: ['openDirectory'],
+    title: nt('Choose your Grand Theft Auto V folder (contains GTA5.exe)'), properties: ['openDirectory'],
   });
   if (r.canceled || !r.filePaths[0]) return null;
   const dir = r.filePaths[0];
   if (!fs.existsSync(path.join(dir, 'GTA5.exe')) || !fs.existsSync(path.join(dir, 'x64a.rpf'))) {
-    throw new Error('That folder does not contain GTA5.exe and the x64*.rpf archives (only the legacy edition is supported).');
+    throw new Error(T('That folder does not contain GTA5.exe and the x64*.rpf archives (only the legacy edition is supported).'));
   }
   writeSettings({ ...readSettings(), gtaDir: dir });
   return dir;
@@ -368,7 +434,7 @@ ipcMain.handle('body:setDir', async () => {
 
 ipcMain.handle('body:load', (_e, gender) => {
   const dir = detectGtaDir(readSettings().gtaDir);
-  if (!dir) throw new Error('Your GTA V folder was not found. Use "Set GTA V folder…".');
+  if (!dir) throw new Error(T('Your GTA V folder was not found. Use "Set GTA V folder…".'));
   return new Promise((resolve, reject) => {
     const id = ++bodyReq;
     bodyPending.set(id, { resolve, reject });
@@ -381,10 +447,11 @@ ipcMain.handle('body:load', (_e, gender) => {
 
 ipcMain.handle('png:save', async (_e, name, dataUrl) => {
   const r = await dialog.showSaveDialog(win, {
-    title: 'Export PNG', defaultPath: String(name || 'texture.png'),
-    filters: [{ name: 'PNG image', extensions: ['png'] }],
+    title: nt('Export PNG'), ...startIn('export', String(name || 'texture.png')),
+    filters: [{ name: nt('PNG image'), extensions: ['png'] }],
   });
   if (r.canceled || !r.filePath) return null;
+  rememberDir('export', path.dirname(r.filePath));
   const b64 = String(dataUrl).replace(/^data:image\/png;base64,/, '');
   fs.writeFileSync(r.filePath, Buffer.from(b64, 'base64'));
   return r.filePath;
@@ -392,30 +459,33 @@ ipcMain.handle('png:save', async (_e, name, dataUrl) => {
 
 ipcMain.handle('project:save', async (_e, name, json) => {
   const r = await dialog.showSaveDialog(win, {
-    title: 'Save layered project', defaultPath: String(name || 'design.csproj'),
-    filters: [{ name: 'ClothingStudio project', extensions: ['csproj'] }],
+    title: nt('Save layered project'), ...startIn('project', String(name || 'design.csproj')),
+    filters: [{ name: nt('ClothingStudio project'), extensions: ['csproj'] }],
   });
   if (r.canceled || !r.filePath) return null;
   fs.writeFileSync(r.filePath, json, 'utf8');
+  rememberDir('project', path.dirname(r.filePath));
   return r.filePath;
 });
 
 ipcMain.handle('project:open', async () => {
   const r = await dialog.showOpenDialog(win, {
-    title: 'Open layered project', properties: ['openFile'],
-    filters: [{ name: 'ClothingStudio project', extensions: ['csproj'] }],
+    title: nt('Open layered project'), properties: ['openFile'],
+    filters: [{ name: nt('ClothingStudio project'), extensions: ['csproj'] }], ...startIn('project'),
   });
   if (r.canceled || !r.filePaths[0]) return null;
+  rememberDir('project', path.dirname(r.filePaths[0]));
   return fs.readFileSync(r.filePaths[0], 'utf8');
 });
 
 ipcMain.handle('image:open', async () => {
   const r = await dialog.showOpenDialog(win, {
-    title: 'Import image', properties: ['openFile'],
-    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }],
+    title: nt('Import image'), properties: ['openFile'],
+    filters: [{ name: nt('Images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }], ...startIn('import'),
   });
   if (r.canceled || !r.filePaths[0]) return null;
   const f = r.filePaths[0];
+  rememberDir('import', path.dirname(f));
   const ext = path.extname(f).slice(1).toLowerCase().replace('jpg', 'jpeg');
   return `data:image/${ext};base64,` + fs.readFileSync(f).toString('base64');
 });
@@ -801,6 +871,10 @@ function smokeTest() {
 }
 
 app.whenReady().then(() => {
+  // No application menu: its hidden default one would reload the window on Ctrl+R / F5 (throwing unsaved painting away) and zoom the
+  // whole page on Ctrl+0 / Ctrl+= / Ctrl+-, which the editor uses for the canvas. All keyboard shortcuts are the page's own (app.js).
+  Menu.setApplicationMenu(null);
+  loadMainLanguage(readSettings().language);
   createWindow();
   // developer self-test hooks: they edit the pack they are pointed at, so they need an explicit extra opt-in
   if (process.env.CS_SMOKE_OUT && process.env.CS_SMOKE_PACK && process.env.CS_SMOKE_ALLOW === 'yes') { register(process.env.CS_SMOKE_PACK); smokeTest(); }

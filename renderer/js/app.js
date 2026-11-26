@@ -1,12 +1,17 @@
 import { api } from './api.js';
+import { t, tn, tm, list, sentences, getLanguage, LANGUAGES, showLanguage, startLanguage, pickLanguage } from './i18n.js';
 import { Viewer } from './viewer.js';
-import { addPieceDialog, optionsDialog } from './pieces.js';
+import { addPieceDialog, optionsDialog, groupText, pieceLabel } from './pieces.js';
+import { growSizes, textureSizeFor, addChoices, memoryMB, mbText } from './texsize.js';
+import { comboOf, shortcutMatches, digitOf } from './keys.js';
+import { GRAINS, foldsMap, grainMap, bend } from './fabric.js';
 
 const Paint = window.Paint;
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const basename = (p) => String(p).split(/[\\/]/).pop();
+const N_ = (s) => s;                 // N_('text') only marks a text for translation (tools/i18n.js collects it); the text is translated where it is shown
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -32,6 +37,7 @@ const S = {
   collapsed: new Set(), filter: '',     // the Pack list: closed Male / Female / category sections, and the filter text
   text: null,                           // the Text tool's open editor: { x, y, ta, layout, drag } (document coordinates)
   customFonts: [],                      // fonts loaded from a file with "Font file…"
+  keepSize: false,                      // "keep the texture size, do not ask again" was ticked in a bigger-image question (until the app is restarted)
 };
 let viewer = null;
 
@@ -42,13 +48,19 @@ function toast(msg, kind = 'info', ms = 5000) {
   setTimeout(() => t.remove(), ms);
 }
 
-function modal({ title, lines = [], input = null, buttons }) {
+// check: an optional tick box under the text, { label, value }; `value` is updated with what the user left it at
+// content: an element for under the text, or a function that gets the finish callback (it ends the dialog with that answer) and returns one; wide: a wider card
+// side: the card sits at the left over the panels and nothing is dimmed, so the texture and the 3D view stay visible (a live preview)
+function modal({ title, lines = [], input = null, check = null, content = null, wide = false, side = false, buttons }) {
   return new Promise((resolve) => {
     const m = $('#modal'), body = $('#mBody'), btns = $('#mBtns');
     $('#mTitle').textContent = title;
+    m.querySelector('.card').classList.toggle('wide', !!wide);
+    m.classList.toggle('side', !!side);
     body.textContent = '';
     for (const l of lines) body.append(el('p', '', l));
-    let inp = null;
+    if (content) body.append(typeof content === 'function' ? content((v) => done(v)) : content);
+    let inp = null, cb = null;
     if (input !== null) {
       inp = el('input');
       inp.type = 'text'; inp.value = input;
@@ -56,14 +68,21 @@ function modal({ title, lines = [], input = null, buttons }) {
       body.append(inp);
       setTimeout(() => { inp.focus(); inp.select(); }, 0);
     }
+    if (check) {
+      const lab = el('label', 'mcheck');
+      cb = el('input'); cb.type = 'checkbox'; cb.checked = !!check.value;
+      lab.append(cb, document.createTextNode(' ' + check.label));
+      body.append(lab);
+    }
     const answer = (b) => (b.id === 'cancel' ? null : b.id === 'ok' ? (inp ? inp.value : 'ok') : b.id);
     const primary = buttons.find((b) => b.accent) || buttons[buttons.length - 1];
-    const done = (v) => { m.hidden = true; document.removeEventListener('keydown', onKey, true); resolve(v); };
+    const done = (v) => { if (check && cb) check.value = cb.checked; m.hidden = true; document.removeEventListener('keydown', onKey, true); resolve(v); };
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); return; }
       if (e.key !== 'Enter') return;
       const f = document.activeElement;
       if (f && f.tagName === 'BUTTON' && btns.contains(f)) return;            // Enter on a focused button presses that button
+      if (f && f.tagName === 'INPUT' && f !== inp && body.contains(f) && f.type !== 'checkbox' && f.type !== 'radio') return;   // Enter in a filter box of the dialog does not answer it
       e.preventDefault(); e.stopPropagation();                                 // otherwise it answers with the main (blue) button
       done(answer(primary));
     };
@@ -78,8 +97,8 @@ function modal({ title, lines = [], input = null, buttons }) {
     m.hidden = false;
   });
 }
-const confirmBox = async (title, lines, ok) => (await modal({ title, lines, buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'ok', label: ok, accent: true }] })) === 'ok';
-const askText = (title, value) => modal({ title, input: value, buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'ok', label: 'OK', accent: true }] });
+const confirmBox = async (title, lines, ok) => (await modal({ title, lines, buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'ok', label: ok, accent: true }] })) === 'ok';
+const askText = (title, value) => modal({ title, input: value, buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'ok', label: t('OK'), accent: true }] });
 
 const setMsg = (t) => { $('#stMsg').textContent = t || ''; };
 const dialogOpen = () => !$('#modal').hidden || !$('#pieceDlg').hidden || !$('#optDlg').hidden;   // shortcuts, paste and drops must not reach the editor behind a dialog
@@ -96,8 +115,8 @@ function toggleCollapsed(key) {
 function pieceRow(it) {
   const open = !!(S.sel && S.sel.item === it);
   const row = el('div', 'tree-item' + (open ? ' sel' : ''));
-  const nameEl = el('span', 'name', it.label + (it.ydd ? '' : ' (no model)'));
-  nameEl.title = 'Click to open this piece. Right-click (or the ⋯ button) for move, add textures and delete.';
+  const nameEl = el('span', 'name', it.ydd ? it.label : t('{label} (no model)', { label: it.label }));
+  nameEl.title = t('Click to open this piece. Right-click (or the ⋯ button) for move, add textures and delete.');
   if (it.variants.length) nameEl.onclick = () => selectVariant(it, open ? S.sel.variant : it.variants[0]);
   row.append(nameEl);
   row.oncontextmenu = (e) => { e.preventDefault(); openPieceMenu(it, { x: e.clientX, y: e.clientY }); };
@@ -105,7 +124,7 @@ function pieceRow(it) {
   const chips = el('span', 'chips');
   for (const v of it.variants) {
     const chip = el('span', 'chip', v.letter);
-    chip.title = basename(v.ytd) + '\nRight-click to delete this texture';
+    chip.title = basename(v.ytd) + '\n' + t('Right-click to delete this texture');
     const entry = S.docs.get(v.ytd);
     if (S.sel && S.sel.ytd === v.ytd) chip.classList.add('sel');
     if (entry && entry.doc.dirty) chip.classList.add('dirty');
@@ -115,18 +134,18 @@ function pieceRow(it) {
   }
   if (it.variants.length) {
     const add = el('span', 'chip add', '+');
-    add.title = 'Add a texture: a copy of the current one, or PNG / .ytd files';
+    add.title = t('Add a texture: a copy of the current one, or PNG / .ytd files');
     add.onclick = () => plusMenu(it);
     chips.append(add);
   }
   if (open && it.variants.length > 1) {
     const del = el('span', 'chip del', '×');
-    del.title = `Delete texture "${S.sel.variant.letter}" (goes to the Recycle Bin; later textures move down a letter)`;
+    del.title = t('Delete texture "{letter}" (goes to the Recycle Bin; later textures move down a letter)', { letter: S.sel.variant.letter });
     del.onclick = () => deleteVariant(it, S.sel.variant);
     chips.append(del);
   }
   const more = el('span', 'chip more', '⋯');
-  more.title = 'Move up / down, add textures, delete this piece';
+  more.title = t('Move up / down, add textures, delete this piece');
   more.onclick = (e) => { e.stopPropagation(); openPieceMenu(it, more); };
   chips.append(more);
   row.append(chips);
@@ -138,7 +157,7 @@ function renderTree() {
   const scroll = root.scrollTop;
   root.textContent = '';
   if (!S.pack) {
-    root.append(el('p', 'hint', 'Open or drop a resource folder such as js_gsp. Male and female pieces appear here.'));
+    root.append(el('p', 'hint', t('Open or drop a resource folder such as js_gsp. Male and female pieces appear here.')));
     return;
   }
   const q = (S.filter || '').trim().toLowerCase();
@@ -152,7 +171,7 @@ function renderTree() {
     const gh = el('div', 'tree-gender ' + gender);
     gh.append(el('span', 'caret', gClosed ? '▸' : '▾'), el('span', 'dot'), el('span', 'gname', genderName(gender)), el('span', 'count', String(items.length)));
     gh.onclick = () => toggleCollapsed(gKey);
-    gh.title = gClosed ? 'Show' : 'Hide';
+    gh.title = gClosed ? t('Show') : t('Hide');
     root.append(gh);
     if (gClosed) continue;
 
@@ -164,7 +183,7 @@ function renderTree() {
         closed = !q && S.collapsed.has(key);
         const gc = items.filter((i) => i.group === group).length;
         const h = el('div', 'tree-group');
-        h.append(el('span', 'caret', closed ? '▸' : '▾'), el('span', 'gtitle', group), el('span', 'count', String(gc)));
+        h.append(el('span', 'caret', closed ? '▸' : '▾'), el('span', 'gtitle', groupText(it)), el('span', 'count', String(gc)));
         h.onclick = () => toggleCollapsed(key);
         root.append(h);
       }
@@ -172,19 +191,33 @@ function renderTree() {
       root.append(pieceRow(it)); shown += 1;
     }
   }
-  if (q && !shown) root.append(el('p', 'hint', `No piece matches "${S.filter.trim()}".`));
+  if (q && !shown) root.append(el('p', 'hint', t('No piece matches "{filter}".', { filter: S.filter.trim() })));
   root.scrollTop = scroll;
 }
 
 // ---------------------------------------------------------------- pieces: add / delete / move / textures / new pack / build
 const pad3 = (n) => String(n).padStart(3, '0');
-const genderName = (g) => (g === 'male' ? 'Male' : 'Female');
+const genderName = (g) => (g === 'male' ? t('Male') : t('Female'));
+const pieceName = (it) => `${genderName(it.gender)} ${it.label}`;
+const piecesText = (n) => tn(n, '{n} piece', '{n} pieces');
+const packTitle = (p) => `${p.name}${p.dlcName ? ' · ' + p.dlcName : ''} · ${piecesText(p.items.length)}`;
+/** The pack scan names pieces in English ("Top 000"): they are shown in the language of the editor, the English kept as labelEn. */
+function localizePack(pack) {
+  for (const it of pack.items) {
+    if (it.labelEn === undefined) it.labelEn = it.label;
+    it.label = pieceLabel(it);
+  }
+  return pack;
+}
+/** A piece name that the main process wrote in English (the .ymt report), as it is shown now. */
+const labelOf = (en) => { const f = S.pack && S.pack.items.find((i) => i.labelEn === en); return f ? f.label : en; };
+const currentLabel = () => (S.sel ? `${genderName(S.sel.item.gender)} · ${S.sel.item.label} · ${S.sel.variant.letter}` : '');
 const sameGroup = (a, b) => a.gender === b.gender && !!a.prop === !!b.prop && a.comp === b.comp;
 const relabel = (it, n) => it.label.replace(/\d{3}$/, pad3(n));
 
 function updatePackName() {
   const p = S.pack;
-  if (p) $('#packName').textContent = `${p.name}${p.dlcName ? ' · ' + p.dlcName : ''} · ${p.items.length} pieces`;
+  if (p) $('#packName').textContent = packTitle(p);
 }
 
 /** After files were renamed / removed / added on disk: follow open paintings to their new files and rebuild the list. */
@@ -198,7 +231,7 @@ async function afterPieceOp({ renames = [], deleted = [], selectId = null, selec
   for (const [k, v] of S.meshes) meshes.set(map.get(k) || k, v);
   S.meshes = meshes;
 
-  const pack = await api.scanPack(S.pack.root);
+  const pack = localizePack(await api.scanPack(S.pack.root));
   S.pack = pack;
   for (const [k, e] of [...S.docs]) {                               // point each open painting at the new piece objects
     const it = pack.items.find((i) => i.variants.some((v) => v.ytd === k));
@@ -214,17 +247,17 @@ async function afterPieceOp({ renames = [], deleted = [], selectId = null, selec
     const keep = S.sel && S.sel.item === pick ? S.sel.variant : null;
     const v = (selectLetter && pick.variants.find((x) => x.letter === selectLetter)) || keep || pick.variants[0];
     await selectVariant(pick, v);
-  } else showEmpty('This pack has no pieces left. Use "Add piece…" in the Pack panel to add .ydd models.');
+  } else showEmpty(N_('This pack has no pieces left. Use "Add piece…" in the Pack panel to add .ydd models.'));
 }
 
 /** Nothing to edit: hide the canvas and the 3D piece instead of leaving a deleted piece on screen. */
-function showEmpty(message) {
+function showEmpty(message) {                       // message: an English text marked with N_(); shown translated (and again when the language changes)
   textEnd(false);
-  S.sel = null; S.last = null;
+  S.sel = null; S.last = null; S.emptyMsg = message;
   $('#world').style.visibility = 'hidden'; $('#handles').style.visibility = 'hidden';
   viewer.setMesh(null); viewer.refresh();
   $('#current').textContent = ''; $('#stSize').textContent = '–'; $('#vInfo').textContent = ''; $('#btnOptions').hidden = true;
-  $('#empty').textContent = message; $('#empty').hidden = false;
+  $('#empty').textContent = t(message); $('#empty').hidden = false;
   if (S.pop) api.viewerSend({ type: 'state', label: '', mesh: null, isProp: false, bone: null, bodyOn: false, hide: [] });
   renderTree();
 }
@@ -245,17 +278,18 @@ function openPieceMenu(it, where) {
   closePieceMenu();
   const n = +it.drawable, count = S.pack.items.filter((i) => sameGroup(i, it)).length;
   const menu = el('div', 'piece-menu');
-  menu.append(el('div', 'pm-title', `${genderName(it.gender)} ${it.label}`));
+  menu.append(el('div', 'pm-title', pieceName(it)));
   const add = (label, fn, disabled, cls) => {
     const b = el('button', cls || '', label); b.disabled = !!disabled;
     b.onclick = () => { closePieceMenu(); fn(); };
     menu.append(b);
   };
-  add('⚙  Options… (audio, flags, hair scale …)', () => openOptions(it), false);
-  add('▲  Move up (swap with the piece above)', () => movePieceUi(it, -1), n <= 0);
-  add('▼  Move down (swap with the piece below)', () => movePieceUi(it, 1), n >= count - 1);
-  add('＋  Add textures…', () => importTexturesUi(it), !it.variants.length);
-  add('🗑  Delete piece…', () => deletePieceUi(it), false, 'danger');
+  add('⚙  ' + t('Options… (audio, flags, hair scale …)'), () => openOptions(it), false);
+  add('▲  ' + t('Move up (swap with the piece above)'), () => movePieceUi(it, -1), n <= 0);
+  add('▼  ' + t('Move down (swap with the piece below)'), () => movePieceUi(it, 1), n >= count - 1);
+  add('＋  ' + t('Add textures…'), () => importTexturesUi(it), !it.variants.length);
+  add('⧉  ' + t('Copy a texture to other pieces…'), () => copyTextureUi(it), !it.variants.length || S.pack.items.length < 2);
+  add('🗑  ' + t('Delete piece…'), () => deletePieceUi(it), false, 'danger');
   document.body.append(menu);
   pieceMenuEl = menu;
   const r = where.getBoundingClientRect ? where.getBoundingClientRect() : null;
@@ -270,13 +304,13 @@ function openPieceMenu(it, where) {
   }, 0);
 }
 
-function warnExtras(list) {
-  if (list && list.length) toast(`These files list pieces by number and were not changed: ${list.join(', ')}. Check them if you use heels, hat hair scaling or first-person / alternate variations.`, 'warn', 12000);
+function warnExtras(files) {
+  if (files && files.length) toast(t('These files list pieces by number and were not changed: {files}. Check them if you use heels, hat hair scaling or first-person / alternate variations.', { files: files.join(', ') }), 'warn', 12000);
 }
 
 function pieceYmtNote(gender) {
   const g = S.ymt && S.ymt.genders && S.ymt.genders.find((x) => x.gender === gender);
-  return g && g.file && !g.error ? `${g.file} is updated to match (original kept once as ${g.file}.bak).` : 'No usable .ymt was found for this gender, so only the files change.';
+  return g && g.file && !g.error ? t('{file} is updated to match (original kept once as {file}.bak).', { file: g.file }) : t('No usable .ymt was found for this gender, so only the files change.');
 }
 
 async function movePieceUi(it, delta) {
@@ -286,9 +320,10 @@ async function movePieceUi(it, delta) {
   try {
     const res = await api.pieceMove(S.pack.root, it.id, to);
     await afterPieceOp({ renames: res.renames, selectId: `${it.gender}_${it.comp}_${pad3(to)}` });
-    toast(`${it.label} is now ${relabel(it, to)}${other ? ` and ${other.label} is now ${it.label}` : ''}. Files${res.ymt ? ' and ' + res.ymt : ''} updated.`, 'ok', 6000);
+    const moved = other ? t('{a} is now {b} and {c} is now {a}.', { a: it.label, b: relabel(it, to), c: other.label }) : t('{a} is now {b}.', { a: it.label, b: relabel(it, to) });
+    toast(sentences(moved, res.ymt ? t('Files and {ymt} updated.', { ymt: res.ymt }) : t('Files updated.')), 'ok', 6000);
     warnExtras(res.warnings);
-  } catch (e) { toast('Could not move the piece: ' + (e.message || e), 'error', 10000); }
+  } catch (e) { toast(t('Could not move the piece: {error}', { error: e.message || e }), 'error', 10000); }
 }
 
 async function deletePieceUi(it) {
@@ -297,26 +332,28 @@ async function deletePieceUi(it) {
   const idx = group.indexOf(it), later = group.slice(idx + 1), n = +it.drawable;
   const dirty = it.variants.some((v) => { const e = S.docs.get(v.ytd); return e && e.doc.dirty; });
   const lines = [
-    `${genderName(it.gender)} ${it.label}: its model and ${it.variants.length} texture${it.variants.length === 1 ? '' : 's'} go to the Recycle Bin (you can restore them from there).`,
-    later.length ? `The later pieces move down so the numbers stay continuous: ${later.map((x) => `${x.label} → ${relabel(x, +x.drawable - 1)}`).join(', ')}. Their files are renamed and unsaved painting stays with each piece.`
-      : 'It is the last piece of its category, so no other piece changes number.',
+    tn(it.variants.length, '{piece}: its model and {n} texture go to the Recycle Bin (you can restore them from there).', '{piece}: its model and {n} textures go to the Recycle Bin (you can restore them from there).', { piece: pieceName(it) }),
+    later.length ? t('The later pieces move down so the numbers stay continuous: {moves}. Their files are renamed and unsaved painting stays with each piece.', { moves: later.map((x) => `${x.label} → ${relabel(x, +x.drawable - 1)}`).join(', ') })
+      : t('It is the last piece of its category, so no other piece changes number.'),
   ];
-  if (dirty) lines.push('You have unsaved painting on it. That painting is lost.');
+  if (dirty) lines.push(t('You have unsaved painting on it. That painting is lost.'));
   lines.push(pieceYmtNote(it.gender));
-  if (!(await confirmBox(`Delete ${it.label}?`, lines, 'Delete piece'))) return;
+  if (!(await confirmBox(t('Delete {piece}?', { piece: it.label }), lines, t('Delete piece')))) return;
   try {
     const res = await api.pieceDelete(S.pack.root, it.id);
     await afterPieceOp({
       renames: res.renames, deleted: res.deleted,
       selectId: later.length ? `${it.gender}_${it.comp}_${pad3(n)}` : (idx > 0 ? `${it.gender}_${it.comp}_${pad3(n - 1)}` : null),
     });
-    toast(`${it.label} moved to the Recycle Bin${later.length ? '; ' + later.map((x) => `${x.label} is now ${relabel(x, +x.drawable - 1)}`).join(', ') : ''}.`, 'ok', 7000);
+    toast(later.length
+      ? t('{piece} moved to the Recycle Bin; {moves}.', { piece: it.label, moves: later.map((x) => t('{a} is now {b}', { a: x.label, b: relabel(x, +x.drawable - 1) })).join(', ') })
+      : t('{piece} moved to the Recycle Bin.', { piece: it.label }), 'ok', 7000);
     warnExtras(res.warnings);
-  } catch (e) { toast('Could not delete the piece: ' + (e.message || e), 'error', 10000); }
+  } catch (e) { toast(t('Could not delete the piece: {error}', { error: e.message || e }), 'error', 10000); }
 }
 
-/** A picked image file -> pixels at the size of the texture it will become. */
-async function imageTexture(token, w, h) {
+/** A picked image file -> pixels at the size of the texture it will become (w x h; `resize` marks a size other than the pack's, which the main process then writes as such). */
+async function imageTexture(token, w, h, resize = false) {
   const img = await Paint.loadImage(await api.fileDataUrl(token));
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -324,17 +361,77 @@ async function imageTexture(token, w, h) {
   g.imageSmoothingQuality = 'high';
   g.drawImage(img, 0, 0, w, h);
   const d = g.getImageData(0, 0, w, h).data;
-  return { kind: 'png', width: w, height: h, rgba: new Uint8Array(d.buffer, d.byteOffset, d.byteLength) };
+  return { kind: 'png', width: w, height: h, resize, rgba: new Uint8Array(d.buffer, d.byteOffset, d.byteLength) };
 }
 
-async function toTextureSpecs(list, tpl) {
+/**
+ * The textures to make from the picked files. Images are scaled to the pack's texture size (tpl), unless `cap` (the longest
+ * side the user allowed in askTextureCap, 0 = keep the pack's size) lets a bigger image have a bigger texture; `sizes` is from imageSizes.
+ */
+async function toTextureSpecs(list, tpl, cap = 0, sizes = new Map()) {
   const out = [];
   for (const t of list) {
-    if (t.kind === 'image') out.push(await imageTexture(t.token, tpl.width, tpl.height));
-    else if (t.kind === 'ytd') out.push({ kind: 'ytd', token: t.token });
+    if (t.kind === 'image') {
+      const d = sizes.get(t.token);
+      const s = d ? textureSizeFor(tpl.width, tpl.height, d.w, d.h, cap) : { w: tpl.width, h: tpl.height, resize: false };
+      out.push(await imageTexture(t.token, s.w, s.h, s.resize));
+    } else if (t.kind === 'ytd') out.push({ kind: 'ytd', token: t.token });
     else out.push({ kind: 'blank' });
   }
   return out;
+}
+
+/** How big (w x h) each picked image is, by token. The decoded pictures are not kept: a 4096 x 4096 image is 64 MB. */
+async function imageSizes(tokens) {
+  const out = new Map();
+  for (const token of tokens) {
+    if (out.has(token)) continue;
+    try { const img = await Paint.loadImage(await api.fileDataUrl(token)); out.set(token, { w: img.naturalWidth, h: img.naturalHeight }); } catch { /* the problem shows when that texture is made */ }
+  }
+  return out;
+}
+
+/** "In game a 1024×1024 DXT1 texture takes about 0.7 MB; 2048×2048 about 2.7 MB": what the bigger sizes cost (sizes: [{ w, h }]). */
+const memoryLine = (w, h, fmt, sizes) => t('In game a {size} {fmt} texture takes about {mem}; {others}.', {
+  size: `${w}×${h}`, fmt, mem: mbText(memoryMB(w, h, fmt)),
+  others: sizes.map((s) => t('{size} about {mem}', { size: `${s.w}×${s.h}`, mem: mbText(memoryMB(s.w, s.h, fmt)) })).join(', '),
+});
+
+/**
+ * The question of the Add flows. Some picked images are bigger than the pack's textures (1024×1024 for a new pack), and a
+ * texture's size is stored in its own .ytd, so each can have its own: keep the pack's size (the image is scaled down), or
+ * make the texture bigger. batches: [{ tpl, textures }], sizes: from imageSizes. Answers the longest side the new
+ * textures may get (0 = keep the pack's size), or null for Cancel.
+ */
+async function askTextureCap(batches, sizes) {
+  if (S.keepSize) return 0;
+  const items = [];
+  for (const b of batches) for (const t of b.textures) {
+    const d = t.kind === 'image' && sizes.get(t.token);
+    if (d) items.push({ name: t.name, w: d.w, h: d.h, tplW: b.tpl.width, tplH: b.tpl.height });
+  }
+  const q = addChoices(items);
+  if (!q) return 0;
+  const n = q.bigger.length, one = n === 1, first = q.bigger[0], fmt = batches[0].tpl.format || 'DXT1';
+  const keepText = [...new Set(q.bigger.map((i) => `${i.tplW}×${i.tplH}`))].join(' / ');
+  const someNames = q.bigger.slice(0, 4).map((i) => `${i.name} (${i.w}×${i.h})`).join(', ');
+  const names = n > 4 ? t('{names} and {n} more', { names: someNames, n: n - 4 }) : someNames;
+  const sizeAt = (cap) => textureSizeFor(first.tplW, first.tplH, one ? first.w : 99999, one ? first.h : 99999, cap);
+  const check = { label: t('Always keep the pack size, do not ask again (until the app is restarted)'), value: false };
+  const r = await modal({
+    title: one ? t('This image is bigger than the texture') : t('Some images are bigger than the textures'),
+    lines: [
+      tn(n, 'This image is bigger than the {size} texture of this pack: {names}.', '{n} of these images are bigger than the {size} textures of this pack: {names}.', { size: keepText, names }),
+      tn(n, 'Keep {size} and it is scaled down. Or give the new texture the size of the image so the detail is kept. A texture\'s size is stored in its own .ytd, so it may differ from the rest of the pack.', 'Keep {size} and they are scaled down. Or give the new textures the size they need so the detail is kept. A texture\'s size is stored in its own .ytd, so it may differ from the rest of the pack.', { size: keepText }),
+      memoryLine(first.tplW, first.tplH, fmt, q.caps.map(sizeAt)),
+    ],
+    check,
+    buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'keep', label: t('Keep {size}', { size: keepText }), accent: true },
+      ...q.caps.map((c) => { const s = sizeAt(c); return { id: 'cap' + c, label: one ? t('Make it {size}', { size: `${s.w}×${s.h}` }) : t('Up to {size}', { size: `${s.w}×${s.h}` }) }; })],
+  });
+  if (!r) return null;
+  if (r === 'keep') { if (check.value) S.keepSize = true; return 0; }
+  return parseInt(r.slice(3), 10);
 }
 
 async function importTexturesUi(it) {
@@ -342,14 +439,22 @@ async function importTexturesUi(it) {
   try {
     const picks = await api.pickTextures();
     if (!picks.length) return;
-    setMsg('Adding textures…');
     const tpl = await api.pieceTemplate(S.pack.root, it.gender, !!it.prop, it.comp, it.id);
-    const res = await api.pieceAddTextures(S.pack.root, it.id, await toTextureSpecs(picks, tpl));
+    const sizes = await imageSizes(picks.filter((p) => p.kind === 'image').map((p) => p.token));
+    const cap = await askTextureCap([{ tpl, textures: picks }], sizes);
+    if (cap === null) return;                                       // Cancel: nothing is added
+    setMsg(t('Adding textures…'));
+    const specs = await toTextureSpecs(picks, tpl, cap, sizes);
+    const res = await api.pieceAddTextures(S.pack.root, it.id, specs);
     const last = res.files[res.files.length - 1];
     const letter = (/_([a-z])(?:_[a-z]{3})?\.ytd$/i.exec(basename(last)) || [])[1] || null;
     await afterPieceOp({ selectId: it.id, selectLetter: letter });
-    toast(`Added ${res.files.length} texture${res.files.length === 1 ? '' : 's'} to ${it.label}${tpl.width ? ` (images are scaled to ${tpl.width}×${tpl.height} like its other textures)` : ''}.`, 'ok', 7000);
-  } catch (e) { toast('Could not add the textures: ' + (e.message || e), 'error', 10000); } finally { setMsg(''); }
+    const grown = [...new Set(specs.filter((s) => s.resize).map((s) => `${s.width}×${s.height}`))];
+    const made = res.files.length, here = { piece: it.label };
+    toast(grown.length ? tn(made, 'Added {n} texture to {piece} (bigger than its other textures: {sizes}).', 'Added {n} textures to {piece} (bigger than its other textures: {sizes}).', { ...here, sizes: grown.join(', ') })
+      : tpl.width ? tn(made, 'Added {n} texture to {piece} (images are scaled to {size} like its other textures).', 'Added {n} textures to {piece} (images are scaled to {size} like its other textures).', { ...here, size: `${tpl.width}×${tpl.height}` })
+        : tn(made, 'Added {n} texture to {piece}.', 'Added {n} textures to {piece}.', here), 'ok', 7000);
+  } catch (e) { toast(t('Could not add the textures: {error}', { error: e.message || e }), 'error', 10000); } finally { setMsg(''); }
 }
 
 /** The Options dialog of a piece: audio, flags, render flag, hair scale (hats), high heels (shoes), shows skin. */
@@ -358,15 +463,16 @@ async function openOptions(it) {
   const root = S.pack.root;
   try {
     const data = await api.pieceOptions(root, it.id);
+    data.label = it.label;                                         // the name in the language of the editor (the main process writes it in English)
     const changes = await optionsDialog({ data });
     if (!changes) return;
-    if (!Object.keys(changes).length) { toast('Nothing was changed.', 'info', 2500); return; }
-    setMsg('Saving options…');
+    if (!Object.keys(changes).length) { toast(t('Nothing was changed.'), 'info', 2500); return; }
+    setMsg(t('Saving options…'));
     const res = await api.pieceSetOptions(root, it.id, changes);
     await afterPieceOp({ renames: res.renames, selectId: it.id });
-    toast(`Saved the options of ${it.label} in ${res.ymt}${changes.hasSkin !== undefined ? ' (the files were renamed)' : ''}.`, 'ok', 5000);
+    toast(changes.hasSkin !== undefined ? t('Saved the options of {piece} in {file} (the files were renamed).', { piece: it.label, file: res.ymt }) : t('Saved the options of {piece} in {file}.', { piece: it.label, file: res.ymt }), 'ok', 5000);
     if (res.warnings && res.warnings.length) toast(res.warnings.join(' | '), 'warn', 9000);
-  } catch (e) { toast('Could not use the options: ' + (e.message || e), 'error', 9000); } finally { setMsg(''); }
+  } catch (e) { toast(t('Could not use the options: {error}', { error: e.message || e }), 'error', 9000); } finally { setMsg(''); }
 }
 
 /** "+" next to the texture chips: a copy of the current texture, or new ones from PNG / JPG / .ytd files. */
@@ -374,9 +480,9 @@ async function plusMenu(it) {
   const src = S.sel && S.sel.item === it ? S.sel.variant : it.variants[it.variants.length - 1];
   const next = String.fromCharCode(Math.max(...it.variants.map((v) => v.letter.charCodeAt(0))) + 1);
   const choice = await modal({
-    title: `Add texture ${next} to ${it.label}`,
-    lines: [`Copy "${src.letter}" to start from it, or bring in your own image or .ytd files.`],
-    buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'copy', label: `Copy of "${src.letter}"` }, { id: 'ok', label: 'Import PNG / YTD…', accent: true }],
+    title: t('Add texture {letter} to {piece}', { letter: next, piece: it.label }),
+    lines: [t('Copy "{letter}" to start from it, or bring in your own image or .ytd files.', { letter: src.letter })],
+    buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'copy', label: t('Copy of "{letter}"', { letter: src.letter }) }, { id: 'ok', label: t('Import PNG / YTD…'), accent: true }],
   });
   if (choice === 'copy') addVariant(it, { skipConfirm: true });
   else if (choice === 'ok') importTexturesUi(it);
@@ -385,69 +491,101 @@ async function plusMenu(it) {
 /** Add .ydd models: pick them (or drop them), say what each is, give each its textures. */
 async function addPiecesFlow(infos) {
   if (S.busy) return;
-  if (!S.pack) { toast('Open or create a pack first.', 'warn'); return; }
+  if (!S.pack) { toast(t('Open or create a pack first.'), 'warn'); return; }
   try {
     if (!infos) infos = await api.pickYdd();
     if (!infos || !infos.length) return;
     const rows = await addPieceDialog({ api, infos, defaultGender: S.sel ? S.sel.item.gender : 'male', toast });
     if (!rows || !rows.length) return;
-    setMsg('Adding pieces…');
     const problems = [];
-    let last = null, added = 0;
+    const plans = [];                                                // each model, with the texture size its slot of the pack uses
     for (const r of rows) {
+      try { plans.push({ r, tpl: await api.pieceTemplate(S.pack.root, r.gender, r.prop, r.comp, null) }); }
+      catch (e) { problems.push(`${r.info.name}: ${e.message || e}`); }
+    }
+    const sizes = await imageSizes(plans.flatMap((p) => p.r.textures.filter((x) => x.kind === 'image').map((x) => x.token)));
+    const cap = await askTextureCap(plans.map((p) => ({ tpl: p.tpl, textures: p.r.textures })), sizes);     // one question for all images
+    if (cap === null) return;                                        // Cancel: nothing is added
+    setMsg(t('Adding pieces…'));
+    let last = null, added = 0;
+    for (const { r, tpl } of plans) {
       try {
-        const tpl = await api.pieceTemplate(S.pack.root, r.gender, r.prop, r.comp, null);
-        const textures = await toTextureSpecs(r.textures, tpl);
+        const textures = await toTextureSpecs(r.textures, tpl, cap, sizes);
         if (!textures.length) textures.push({ kind: 'blank' });
         const res = await api.pieceAdd(S.pack.root, { gender: r.gender, prop: r.prop, comp: r.comp, hasSkin: r.hasSkin, yddToken: r.info.token, textures });
         last = res.id; added += 1;
       } catch (e) { problems.push(`${r.info.name}: ${e.message || e}`); }
     }
     if (added) await afterPieceOp({ selectId: last });
-    if (added) toast(`Added ${added} piece${added === 1 ? '' : 's'}. Paint on their textures, then Save to YTD.`, 'ok', 7000);
-    if (problems.length) toast('Could not add: ' + problems.join(' | '), 'error', 14000);
-  } catch (e) { toast('Could not add pieces: ' + (e.message || e), 'error', 10000); } finally { setMsg(''); }
+    if (added) toast(tn(added, 'Added {n} piece. Paint on its textures, then Save to YTD.', 'Added {n} pieces. Paint on their textures, then Save to YTD.'), 'ok', 7000);
+    if (problems.length) toast(t('Could not add: {error}', { error: problems.join(' | ') }), 'error', 14000);
+  } catch (e) { toast(t('Could not add pieces: {error}', { error: e.message || e }), 'error', 10000); } finally { setMsg(''); }
 }
 
 async function newPackUi() {
-  const name = await askText('New pack - resource name (letters, digits, underscore)', 'my_clothes');
+  const name = await askText(t('New pack - resource name (letters, digits, underscore)'), 'my_clothes');
   if (!name || !name.trim()) return;
   try {
     const pack = await api.packNew(name.trim());
     if (!pack) return;
     await loadPack(pack);
-    toast(`Created ${pack.name}. Now choose the .ydd models to put in it.`, 'ok', 6000);
+    toast(t('Created {name}. Now choose the .ydd models to put in it.', { name: pack.name }), 'ok', 6000);
     await addPiecesFlow();
   } catch (e) { toast(String(e.message || e), 'error', 9000); }
 }
 
+/** "Build": a FiveM resource folder for a server, or a single-player DLC pack (dlc.rpf) for story mode. */
 async function buildPackUi() {
-  if (!S.pack) { toast('Open a pack first.', 'warn'); return; }
-  const name = await askText('Build FiveM resource - name', S.pack.dlcName || S.pack.name);
+  if (!S.pack) { toast(t('Open a pack first.'), 'warn'); return; }
+  let last = 'fivem';
+  try { last = localStorage.getItem('cs.buildTarget') === 'sp' ? 'sp' : 'fivem'; } catch { /* ignore */ }
+  const choice = await modal({
+    title: t('Build the pack for…'),
+    lines: [
+      t('FiveM resource: a clean resource folder for your server (stream files, .meta files, .ymt, fxmanifest.lua).'),
+      t('Single player: a dlc.rpf DLC pack for story mode, installed with OpenIV. It follows the layout of the game\'s own clothing DLCs but has not been tried in game yet.'),
+    ],
+    buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'sp', label: t('Single player (dlc.rpf)'), accent: last === 'sp' }, { id: 'fivem', label: t('FiveM resource'), accent: last !== 'sp' }],
+  });
+  if (!choice) return;
+  try { localStorage.setItem('cs.buildTarget', choice); } catch { /* ignore */ }
+  const sp = choice === 'sp';
+  const name = await askText(sp ? t('Build single-player pack - name') : t('Build FiveM resource - name'), S.pack.dlcName || S.pack.name);
   if (!name || !name.trim()) return;
   try {
-    setMsg('Building…');
-    const rep = await api.packBuild(S.pack.root, name.trim());
+    setMsg(t('Building…'));
+    const rep = await api.packBuild(S.pack.root, name.trim(), sp ? 'sp' : 'fivem');
     if (!rep) return;
-    await modal({
-      title: 'FiveM resource built',
+    await modal(sp ? {
+      title: t('Single-player pack built'),
       lines: [
         rep.root,
-        `${rep.files} stream files copied, plus ${rep.ymt.join(' and ')}, the .meta files and fxmanifest.lua.`,
+        tn(rep.files, '{n} stream file is packed into dlc.rpf ({size}).', '{n} stream files are packed into dlc.rpf ({size}).', { size: mbText(rep.bytes / 1048576) }),
         ...(rep.notes || []),
-        `Copy the folder into your server's resources and add "ensure ${rep.name}" to server.cfg.`,
+        t('Copy the folder into <your GTA V folder>\\mods\\update\\x64\\dlcpacks\\ (OpenIV\'s mods folder) and add this line to dlclist.xml:'),
+        rep.dlclist,
+        t('INSTALL.txt in the folder explains each step. Keep a backup of your game files: this was not tried in game yet.'),
       ],
-      buttons: [{ id: 'ok', label: 'OK', accent: true }],
+      buttons: [{ id: 'ok', label: t('OK'), accent: true }],
+    } : {
+      title: t('FiveM resource built'),
+      lines: [
+        rep.root,
+        tn(rep.files, '{n} stream file copied, plus {ymt}, the .meta files and fxmanifest.lua.', '{n} stream files copied, plus {ymt}, the .meta files and fxmanifest.lua.', { ymt: list(rep.ymt) }),
+        ...(rep.notes || []),
+        t('Copy the folder into your server\'s resources and add "ensure {name}" to server.cfg.', { name: rep.name }),
+      ],
+      buttons: [{ id: 'ok', label: t('OK'), accent: true }],
     });
-  } catch (e) { toast('Build failed: ' + (e.message || e), 'error', 12000); } finally { setMsg(''); }
+  } catch (e) { toast(t('Build failed: {error}', { error: e.message || e }), 'error', 12000); } finally { setMsg(''); }
 }
 
 /** One sentence for the add / delete dialogs about what happens to the pack's .ymt. */
 function ymtNote(gender) {
   const g = S.ymt && S.ymt.genders && S.ymt.genders.find((x) => x.gender === gender);
-  if (g && g.file && !g.error) return `${g.file} (the file that tells the game how many textures each piece has) is updated to match. Its original is kept once as ${g.file}.bak.`;
-  if (g && g.error) return `${g.file} could not be read, so it will not be updated and the game will not know about this change until it is rebuilt.`;
-  return 'No .ymt was found in this pack, so the game will not know about this change until one exists.';
+  if (g && g.file && !g.error) return t('{file} (the file that tells the game how many textures each piece has) is updated to match. Its original is kept once as {file}.bak.', { file: g.file });
+  if (g && g.error) return t('{file} could not be read, so it will not be updated and the game will not know about this change until it is rebuilt.', { file: g.file });
+  return t('No .ymt was found in this pack, so the game will not know about this change until one exists.');
 }
 
 /** "+" next to the a / b chips: make the next texture variant (c after b ...) as a new .ytd beside the others. */
@@ -461,37 +599,37 @@ async function addVariant(it, opts = {}) {
   const painted = !!(cur && entry && entry.doc.dirty);        // you have unsaved paint on the one you copy from
   const name = basename(src.ytd).replace(new RegExp(`_${src.letter}(?=(_[a-z]{3})?\\.ytd$)`, 'i'), `_${next}`);
   const lines = [
-    `${it.gender === 'male' ? 'Male' : 'Female'} ${it.label} gets a new texture "${next}":`,
+    t('{piece} gets a new texture "{letter}":', { piece: pieceName(it), letter: next }),
     name,
-    `It starts as a copy of "${src.letter}". Nothing existing is changed or overwritten.`,
+    t('It starts as a copy of "{letter}". Nothing existing is changed or overwritten.', { letter: src.letter }),
     ymtNote(it.gender),
   ];
   let how = 'disk';
   if (painted) {
     how = await modal({
-      title: `Add texture ${next}`,
-      lines: [...lines.slice(0, 2), `You have unsaved painting on "${src.letter}". What should "${next}" start as?`, lines[3]],
-      buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'disk', label: `Copy saved "${src.letter}"` }, { id: 'ok', label: 'Copy my painting', accent: true }],
+      title: t('Add texture {letter}', { letter: next }),
+      lines: [...lines.slice(0, 2), t('You have unsaved painting on "{letter}". What should "{next}" start as?', { letter: src.letter, next }), lines[3]],
+      buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'disk', label: t('Copy saved "{letter}"', { letter: src.letter }) }, { id: 'ok', label: t('Copy my painting'), accent: true }],
     });
     if (!how) return;
     if (how === 'ok') how = 'paint';
-  } else if (!opts.skipConfirm && !(await confirmBox(`Add texture ${next}`, lines, `Create ${next}`))) return;
+  } else if (!opts.skipConfirm && !(await confirmBox(t('Add texture {letter}', { letter: next }), lines, t('Create {letter}', { letter: next })))) return;
 
   try {
-    setMsg('Creating the new texture…');
+    setMsg(t('Creating the new texture…'));
     const res = await api.addVariant(src.ytd, used);
     if (how === 'paint') {
       const rgba = Paint.flatRGBA(entry.doc);
-      await api.saveTexture(res.file, new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), { backup: false });
+      await api.saveTexture(res.file, new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), { backup: false, width: entry.doc.w, height: entry.doc.h });   // the painting may have a new size (the copy then gets it)
     }
     const v = { letter: res.letter, race: res.race || null, ytd: res.file };
     it.variants.push(v);
     it.variants.sort((a, b) => a.letter.localeCompare(b.letter));
     await selectVariant(it, v);
-    toast(`Created ${basename(res.file)}${how === 'paint' ? ' from your painting' : ''}. Paint on it, then Save to YTD.`, 'ok', 7000);
+    toast(how === 'paint' ? t('Created {file} from your painting. Paint on it, then Save to YTD.', { file: basename(res.file) }) : t('Created {file}. Paint on it, then Save to YTD.', { file: basename(res.file) }), 'ok', 7000);
     await syncYmt({ gender: it.gender, only: it.id });
   } catch (e) {
-    toast('Could not add the texture: ' + (e.message || e), 'error', 9000);
+    toast(t('Could not add the texture: {error}', { error: e.message || e }), 'error', 9000);
     try { await afterPieceOp(); } catch { /* the list is refreshed from disk so it shows what really exists */ }
   } finally { setMsg(''); }
 }
@@ -502,20 +640,20 @@ async function addVariant(it, opts = {}) {
  */
 async function deleteVariant(it, v) {
   if (S.busy) return;
-  if (it.variants.length < 2) { toast('A piece needs at least one texture, so its only texture cannot be deleted.', 'warn', 7000); return; }
+  if (it.variants.length < 2) { toast(t('A piece needs at least one texture, so its only texture cannot be deleted.'), 'warn', 7000); return; }
   const order = it.variants, idx = order.indexOf(v);
   if (idx < 0) return;
   const moves = order.slice(idx + 1).map((x, i) => ({ v: x, from: x.letter, to: order[idx + i].letter }));
   const entry = S.docs.get(v.ytd);
   const lines = [
-    `${it.gender === 'male' ? 'Male' : 'Female'} ${it.label}, texture "${v.letter}":`,
+    t('{piece}, texture "{letter}":', { piece: pieceName(it), letter: v.letter }),
     basename(v.ytd),
-    'The file is moved to the Recycle Bin, so you can still restore it from there.',
+    t('The file is moved to the Recycle Bin, so you can still restore it from there.'),
   ];
-  if (moves.length) lines.push(`The later textures then move down so the letters stay in order: ${moves.map((m) => `${m.from} → ${m.to}`).join(', ')}. Their files are renamed and any unsaved painting stays with its texture.`);
-  if (entry && entry.doc.dirty) lines.push(`You have unsaved painting on "${v.letter}". That painting is lost.`);
+  if (moves.length) lines.push(t('The later textures then move down so the letters stay in order: {moves}. Their files are renamed and any unsaved painting stays with its texture.', { moves: moves.map((m) => `${m.from} → ${m.to}`).join(', ') }));
+  if (entry && entry.doc.dirty) lines.push(t('You have unsaved painting on "{letter}". That painting is lost.', { letter: v.letter }));
   lines.push(ymtNote(it.gender));
-  if (!(await confirmBox(`Delete texture ${v.letter}?`, lines, `Delete ${v.letter}`))) return;
+  if (!(await confirmBox(t('Delete texture {letter}?', { letter: v.letter }), lines, t('Delete {letter}', { letter: v.letter })))) return;
 
   try {
     const res = await api.deleteVariant(v.ytd);
@@ -529,25 +667,145 @@ async function deleteVariant(it, v) {
       const e = S.docs.get(r.from);
       if (e) { S.docs.delete(r.from); S.docs.set(r.to, e); e.ytd = r.to; }
     }
-    toast(`Texture "${v.letter}" moved to the Recycle Bin${moves.length ? '; ' + moves.map((m) => `${m.from} is now ${m.to}`).join(', ') : ''}.`, 'ok', 6000);
+    toast(moves.length
+      ? t('Texture "{letter}" moved to the Recycle Bin; {moves}.', { letter: v.letter, moves: moves.map((m) => t('{a} is now {b}', { a: m.from, b: m.to })).join(', ') })
+      : t('Texture "{letter}" moved to the Recycle Bin.', { letter: v.letter }), 'ok', 6000);
     if (wasSelected) await selectVariant(it, it.variants[Math.min(idx, it.variants.length - 1)]);
     else {
       if (S.sel && S.sel.item === it) {              // the piece you are editing may have been renamed under you
-        $('#current').textContent = `${it.gender === 'male' ? 'Male' : 'Female'} · ${it.label} · ${S.sel.variant.letter}`;
-        setMsg(`Editing ${basename(S.sel.ytd)}`);
+        $('#current').textContent = currentLabel();
+        setMsg(t('Editing {file}', { file: basename(S.sel.ytd) }));
         if (S.pop) api.viewerSend({ type: 'label', label: $('#current').textContent });
       }
       renderTree();
     }
     await syncYmt({ gender: it.gender, only: it.id });
   } catch (e) {
-    toast('Could not delete the texture: ' + (e.message || e), 'error', 9000);
+    toast(t('Could not delete the texture: {error}', { error: e.message || e }), 'error', 9000);
     try { await afterPieceOp(); } catch { /* the list is refreshed from disk so it shows what really exists */ }
   }
 }
 
+// ---------------------------------------------------------------- copy a texture to other pieces
+/**
+ * A list of pieces with a tick box each, grouped like the Pack list, with a filter box and two quick buttons. `picked` (a Set) holds
+ * the ticked pieces; "Tick the same kind" ticks the shown pieces of the same gender and category as `same`.
+ */
+function pieceChecklist(items, same, picked) {
+  const box = el('div', 'copybox');
+  const bar = el('div', 'copybar');
+  const filter = el('input'); filter.type = 'search'; filter.placeholder = t('Filter pieces…'); filter.spellcheck = false; filter.autocomplete = 'off';
+  const sameBtn = el('button', 'btn small', t('Tick the same kind'));
+  const noneBtn = el('button', 'btn small', t('Untick all'));
+  const count = el('span', 'muted copycount');
+  bar.append(filter, sameBtn, noneBtn, count);
+  const list = el('div', 'copylist');
+  const rows = [];
+  let group = null, head = null;
+  for (const gender of ['male', 'female']) {
+    for (const it of items.filter((i) => i.gender === gender)) {
+      if (`${gender}|${it.group}` !== group) {
+        group = `${gender}|${it.group}`;
+        head = el('div', 'copyhead', `${genderName(gender)} · ${groupText(it)}`);
+        list.append(head);
+      }
+      const row = el('label', 'copyrow');
+      const cb = el('input'); cb.type = 'checkbox';
+      row.append(cb, el('span', 'copyname', it.label), el('span', 'muted', it.variants.map((v) => v.letter).join(' ')));
+      list.append(row);
+      const r = { it, row, cb, head };
+      cb.onchange = () => { if (cb.checked) picked.add(it); else picked.delete(it); update(); };
+      rows.push(r);
+    }
+  }
+  const update = () => { count.textContent = tn(picked.size, '{n} piece ticked', '{n} pieces ticked'); };
+  filter.oninput = () => {
+    const q = filter.value.trim().toLowerCase(), heads = new Set();
+    for (const r of rows) {
+      const show = !q || `${r.it.gender} ${genderName(r.it.gender)} ${r.it.group} ${groupText(r.it)} ${r.it.label} ${r.it.comp}`.toLowerCase().includes(q);
+      r.row.hidden = !show;
+      if (show) heads.add(r.head);
+    }
+    for (const r of rows) r.head.hidden = !heads.has(r.head);
+  };
+  sameBtn.onclick = () => {
+    for (const r of rows) if (!r.row.hidden && r.it.gender === same.gender && r.it.comp === same.comp && !!r.it.prop === !!same.prop) { r.cb.checked = true; picked.add(r.it); }
+    update();
+  };
+  noneBtn.onclick = () => { for (const r of rows) r.cb.checked = false; picked.clear(); update(); };
+  box.append(bar, list);
+  update();
+  setTimeout(() => filter.focus(), 30);                             // after the dialog has focused its main button: typing filters at once
+  return box;
+}
+
+/**
+ * Copy a texture of a piece onto other pieces (other models): every ticked piece gets the copy as its next texture letter. The copy is
+ * the .ytd as it is saved (same size and format), or, when you choose it, your unsaved painting on it. The .ymt follows.
+ */
+async function copyTextureUi(it, v) {
+  if (S.busy || !S.pack || !it || !it.variants.length) return;
+  if (!textSettle()) return;                                       // text you are still typing is part of the painting
+  const others = S.pack.items.filter((i) => i !== it && i.variants.length && i.variants.length < 26);   // a - z: a full piece cannot take one more
+  if (!others.length) { toast(t('There is no other piece to copy the texture to.'), 'warn'); return; }
+  let src = (v && it.variants.includes(v) && v) || (S.sel && S.sel.item === it ? S.sel.variant : it.variants[0]);
+  const picked = new Set();
+  const choice = await modal({
+    title: t('Copy a texture to other pieces'),
+    wide: true,
+    lines: [t('Tick the pieces that get a copy of this texture as their next texture. A model with a different UV layout shows it differently, so pieces of the same kind work best.')],
+    content: () => {
+      const wrap = el('div');
+      const row = el('div', 'copysrc');
+      row.append(el('span', '', t('Texture of {piece}:', { piece: pieceName(it) })));
+      for (const x of it.variants) {
+        const lab = el('label', 'copyletter');
+        const rb = el('input'); rb.type = 'radio'; rb.name = 'copysrc'; rb.checked = x === src;
+        rb.onchange = () => { if (rb.checked) src = x; };
+        lab.append(rb, document.createTextNode(' ' + x.letter));
+        row.append(lab);
+      }
+      wrap.append(row, pieceChecklist(others, it, picked));
+      return wrap;
+    },
+    buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'ok', label: t('Copy'), accent: true }],
+  });
+  if (choice !== 'ok') return;
+  const targets = others.filter((i) => picked.has(i));
+  if (!targets.length) { toast(t('Tick at least one piece to copy the texture to.'), 'warn', 5000); return; }
+  const entry = S.docs.get(src.ytd);
+  let how = 'disk';
+  if (entry && entry.doc.dirty) {
+    how = await modal({
+      title: t('Copy a texture to other pieces'),
+      lines: [t('You have unsaved painting on "{letter}". Should the copies have your painting, or the texture as it is saved?', { letter: src.letter })],
+      buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'disk', label: t('Copy saved "{letter}"', { letter: src.letter }) }, { id: 'ok', label: t('Copy my painting'), accent: true }],
+    });
+    if (!how) return;
+    if (how === 'ok') how = 'paint';
+  }
+  let spec;
+  if (how === 'paint') {
+    const rgba = Paint.flatRGBA(entry.doc);                         // at the painting's own size (it may have been made bigger)
+    spec = { kind: 'png', width: entry.doc.w, height: entry.doc.h, resize: true, rgba: new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength) };
+  } else spec = { kind: 'copy', ytd: src.ytd };
+  const done = [], failed = [];
+  try {
+    setMsg(t('Copying the texture…'));
+    for (const target of targets) {
+      try {
+        const res = await api.pieceAddTextures(S.pack.root, target.id, [spec]);
+        const letter = (/_([a-z])(?:_[a-z]{3})?\.ytd$/i.exec(basename(res.files[0])) || [])[1] || '?';
+        done.push(`${target.label} ${letter}`);
+      } catch (e) { failed.push(`${target.label}: ${e.message || e}`); }
+    }
+    if (done.length) await afterPieceOp({ selectId: it.id, selectLetter: src.letter });
+  } finally { setMsg(''); }
+  if (done.length) toast(tn(done.length, 'Copied texture "{letter}" to {n} piece: {pieces}.', 'Copied texture "{letter}" to {n} pieces: {pieces}.', { letter: src.letter, pieces: done.join(', ') }), 'ok', 9000);
+  if (failed.length) toast(t('Could not copy to: {error}', { error: failed.join(' | ') }), 'error', 14000);
+}
+
 // ---------------------------------------------------------------- the pack's .ymt (texture counts the game reads)
-const GENDER = { male: 'Male', female: 'Female' };
 
 /** Ask the main process how the .ymt files compare with the textures on disk and show it in the top bar. */
 async function refreshYmt() {
@@ -562,10 +820,10 @@ async function refreshYmt() {
   const gs = st.genders || [];
   const found = gs.filter((g) => g.file);
   const bad = found.reduce((n, g) => n + g.diffs.length + g.missing.length, 0);
-  if (st.error || found.some((g) => g.error)) { chip.textContent = '.ymt ?'; chip.classList.add('err'); chip.title = 'Could not read the .ymt - click for details'; }
-  else if (!found.length) { chip.textContent = 'no .ymt'; chip.title = 'No ped .ymt was found in this pack\'s stream folder'; }
-  else if (bad) { chip.textContent = `.ymt ≠ files (${bad})`; chip.classList.add('warn'); chip.title = 'The .ymt does not match the pieces / textures on disk - click to see and fix'; }
-  else { chip.textContent = '.ymt ✓'; chip.classList.add('ok'); chip.title = 'The .ymt matches the texture files'; }
+  if (st.error || found.some((g) => g.error)) { chip.textContent = '.ymt ?'; chip.classList.add('err'); chip.title = t('Could not read the .ymt - click for details'); }
+  else if (!found.length) { chip.textContent = t('no .ymt'); chip.title = t('No ped .ymt was found in this pack\'s stream folder'); }
+  else if (bad) { chip.textContent = t('.ymt ≠ files ({n})', { n: bad }); chip.classList.add('warn'); chip.title = t('The .ymt does not match the pieces / textures on disk - click to see and fix'); }
+  else { chip.textContent = '.ymt ✓'; chip.classList.add('ok'); chip.title = t('The .ymt matches the texture files'); }
 }
 
 async function showYmt() {
@@ -575,17 +833,17 @@ async function showYmt() {
   const lines = [];
   if (st.error) lines.push(st.error);
   for (const g of st.genders || []) {
-    if (!g.file) { lines.push(`${GENDER[g.gender]}: no .ymt file found.`); continue; }
-    if (g.error) { lines.push(`${g.file}: could not be read (${g.error}). Nothing is changed.`); continue; }
-    if (!g.diffs.length && !g.missing.length) { lines.push(`${g.file}: matches the files.`); continue; }
-    for (const d of g.diffs) lines.push(`${g.file}: ${d.label} has ${d.have} texture${d.have === 1 ? '' : 's'} listed but ${d.want} file${d.want === 1 ? '' : 's'}.`);
-    for (const m of g.missing) lines.push(`${g.file}: ${m.label} has files but is not listed in the .ymt.`);
+    if (!g.file) { lines.push(t('{gender}: no .ymt file found.', { gender: genderName(g.gender) })); continue; }
+    if (g.error) { lines.push(t('{file}: could not be read ({error}). Nothing is changed.', { file: g.file, error: g.error })); continue; }
+    if (!g.diffs.length && !g.missing.length) { lines.push(t('{file}: matches the files.', { file: g.file })); continue; }
+    for (const d of g.diffs) lines.push(t('{file}: {piece} has {listed} listed but {files}.', { file: g.file, piece: labelOf(d.label), listed: tn(d.have, '{n} texture', '{n} textures'), files: tn(d.want, '{n} file', '{n} files') }));
+    for (const m of g.missing) lines.push(t('{file}: {piece} has files but is not listed in the .ymt.', { file: g.file, piece: labelOf(m.label) }));
   }
   const fixable = (st.genders || []).some((g) => (g.diffs && g.diffs.length) || (g.missing && g.missing.length));
-  if (fixable) lines.push('Update fixes the texture counts and lists missing pieces, keeps everything else in the .ymt as it is, and saves the original once as .ymt.bak. (A piece can only be listed when its number follows on from the others.)');
+  if (fixable) lines.push(t('Update fixes the texture counts and lists missing pieces, keeps everything else in the .ymt as it is, and saves the original once as .ymt.bak. (A piece can only be listed when its number follows on from the others.)'));
   const r = await modal({
-    title: 'Pack .ymt', lines,
-    buttons: fixable ? [{ id: 'cancel', label: 'Close' }, { id: 'ok', label: 'Update .ymt', accent: true }] : [{ id: 'cancel', label: 'Close' }],
+    title: t('Pack .ymt'), lines,
+    buttons: fixable ? [{ id: 'cancel', label: t('Close') }, { id: 'ok', label: t('Update .ymt'), accent: true }] : [{ id: 'cancel', label: t('Close') }],
   });
   if (r === 'ok') await syncYmt({}, true);
 }
@@ -598,42 +856,48 @@ async function syncYmt(opts, loud) {
     if (!res) return null;
     const bits = [];
     for (const r of res.results) {
-      if (r.error) toast(`Could not update ${r.file}: ${r.error}. The .ymt was not changed.`, 'warn', 10000);
-      else if (!r.file) bits.push(`no ${GENDER[r.gender].toLowerCase()} .ymt found`);
-      else if (r.changes && r.changes.length) bits.push(`${r.file}: ${r.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(', ')}${r.backup ? ` (original kept as ${r.backup})` : ''}`);
+      if (r.error) toast(t('Could not update {file}: {error}. The .ymt was not changed.', { file: r.file, error: r.error }), 'warn', 10000);
+      else if (!r.file) bits.push(r.gender === 'male' ? t('no male .ymt found') : t('no female .ymt found'));
+      else if (r.changes && r.changes.length) {
+        const what = r.changes.map((c) => `${labelOf(c.label)} ${c.from} → ${c.to}`).join(', ');
+        bits.push(r.backup ? t('{file}: {changes} (original kept as {backup})', { file: r.file, changes: what, backup: r.backup }) : `${r.file}: ${what}`);
+      }
     }
     await refreshYmt();
-    if (bits.length) toast('Updated the .ymt - ' + bits.join('; '), 'ok', 9000);
-    else if (loud) toast('The .ymt already matches the files.', 'ok', 4000);
+    if (bits.length) toast(t('Updated the .ymt - {changes}', { changes: bits.join('; ') }), 'ok', 9000);
+    else if (loud) toast(t('The .ymt already matches the files.'), 'ok', 4000);
     return bits.join('; ');
   } catch (e) {
-    toast('Could not update the .ymt: ' + (e.message || e), 'warn', 9000);
+    toast(t('Could not update the .ymt: {error}', { error: e.message || e }), 'warn', 9000);
     return null;
   }
 }
 
 async function loadPack(pack) {
-  if (S.opBusy) { toast('Wait for the current operation to finish first.', 'warn', 3000); return; }
+  if (S.opBusy) { toast(t('Wait for the current operation to finish first.'), 'warn', 3000); return; }
   if (!textSettle()) return;
   if (window.csDirty && window.csDirty() &&
-      !(await confirmBox('Unsaved painting', ['You have painting that is not saved to a .ytd or a layers file. Opening a pack throws it away.'], 'Discard and open'))) return;
+      !(await confirmBox(t('Unsaved painting'), [t('You have painting that is not saved to a .ytd or a layers file. Opening a pack throws it away.')], t('Discard and open')))) return;
   S.docs.clear(); S.meshes.clear(); S.sel = null; S.last = null;       // nothing from the previous pack may leak into this one
-  S.pack = pack;
+  S.pack = localizePack(pack);
   refreshYmt();
   if (pack.recovered) {
     const rc = pack.recovered;
-    if (rc.rolledBack) toast(`An earlier operation was interrupted. ${rc.rolledBack} file change${rc.rolledBack === 1 ? ' was' : 's were'} undone, so the pack is back as it was before it.`, 'warn', 12000);
-    if (rc.restored.length) toast(`${rc.restored.length} file${rc.restored.length === 1 ? ' was' : 's were'} put back under ${rc.restored.length === 1 ? 'its' : 'their'} original name: ${rc.restored.slice(0, 4).join(', ')}${rc.restored.length > 4 ? ' …' : ''}.`, 'warn', 12000);
-    if (rc.stuck.length) toast(`${rc.stuck.join(', ')} could not be put back (the original name is taken). Rename ${rc.stuck.length === 1 ? 'it' : 'them'} by hand by removing ".cs_mv".`, 'error', 15000);
+    if (rc.rolledBack) toast(tn(rc.rolledBack, 'An earlier operation was interrupted. {n} file change was undone, so the pack is back as it was before it.', 'An earlier operation was interrupted. {n} file changes were undone, so the pack is back as it was before it.'), 'warn', 12000);
+    if (rc.restored.length) {
+      const some = rc.restored.slice(0, 4).join(', ') + (rc.restored.length > 4 ? ' …' : '');
+      toast(tn(rc.restored.length, '{n} file was put back under its original name: {files}.', '{n} files were put back under their original names: {files}.', { files: some }), 'warn', 12000);
+    }
+    if (rc.stuck.length) toast(tn(rc.stuck.length, '{files} could not be put back (the original name is taken). Rename it by hand by removing ".cs_mv".', '{files} could not be put back (the original names are taken). Rename them by hand by removing ".cs_mv".', { files: rc.stuck.join(', ') }), 'error', 15000);
   }
-  $('#packName').textContent = `${pack.name}${pack.dlcName ? ' · ' + pack.dlcName : ''} · ${pack.items.length} pieces`;
+  updatePackName();
   renderTree();
-  toast(`Opened ${pack.name}: ${pack.items.length} pieces found.`, 'ok', 3000);
+  toast(tn(pack.items.length, 'Opened {name}: {n} piece found.', 'Opened {name}: {n} pieces found.', { name: pack.name }), 'ok', 3000);
   const usable = pack.items.filter((i) => i.ydd && i.variants.length);
   const first = usable.find((i) => i.gender === 'male' && i.comp === 'p_head') || usable.find((i) => i.gender === 'male')
     || usable[0] || pack.items.find((i) => i.variants.length);
   if (first) await selectVariant(first, first.variants[0]);
-  else showEmpty('This pack has no pieces yet. Use "Add piece…" in the Pack panel to add .ydd models.');
+  else showEmpty(N_('This pack has no pieces yet. Use "Add piece…" in the Pack panel to add .ydd models.'));
 }
 
 async function openPackDialog() {
@@ -679,6 +943,37 @@ function makePreviewCanvas(w, h) {
   return c;
 }
 
+/** The status bar's texture size: what the open painting is now, and (until Save to YTD) what the .ytd still has. */
+function showTexSize(e) {
+  const d = e.doc, tx = e.tex;
+  $('#stSize').textContent = d.w === tx.width && d.h === tx.height
+    ? (tx.mips > 1 ? t('{size} {fmt} · {mips} mips', { size: `${tx.width}×${tx.height}`, fmt: tx.format, mips: tx.mips }) : `${tx.width}×${tx.height} ${tx.format}`)
+    : t('{size} {fmt} · resized from {from}, not saved yet', { size: `${d.w}×${d.h}`, fmt: tx.format, from: `${tx.width}×${tx.height}` });
+}
+
+/** Give the open texture another resolution (the .ytd itself changes when you press Save to YTD). False if that was not possible. */
+function resizeTextureTo(w, h) {
+  if (!S.sel || !Paint.doc || !textSettle()) return false;
+  Paint.resizeDoc(w, h);
+  return true;
+}
+
+/** The painting's resolution changed - a resize, or Undo / Redo of one: what was made for the old size follows. */
+function onDocResized() {
+  const e = S.sel, d = Paint.doc;
+  if (!e || !d || e.doc !== d) return;
+  const g = d.guide;
+  if (g && g.uv) {                                                 // the model's UV lines, drawn again for the new size so they stay crisp
+    const mesh = e.item.ydd && S.meshes.get(e.item.ydd), drawable = mesh && mesh.drawables[0];
+    const uv = drawable && uvGuideCanvas(drawable, d.w, d.h);
+    if (uv) { e.uv = uv; Paint.setGuide(uv); d.guide.opacity = g.opacity; d.guide.visible = g.visible; d.guide.uv = true; }
+  }
+  const pv = makePreviewCanvas(d.w, d.h);                          // the 3D view's copy is at most 1024 wide
+  if (pv.width !== e.preview.width || pv.height !== e.preview.height) { e.preview = pv; viewer.setTextureCanvas(pv); }
+  showTexSize(e);
+  fit();
+}
+
 // ---------------------------------------------------------------- mannequin (body from the user's GTA V)
 const PROP_BONE = {
   p_head: 'head', p_eyes: 'head', p_ears: 'head', p_mouth: 'head', p_lhand: 'lHand', p_lwrist: 'lHand',
@@ -689,8 +984,8 @@ const HIDE_FOR = { lowr: ['lowr'], feet: ['feet'], uppr: ['uppr'] }; // body slo
 function updateBodyButton() {
   const b = $('#vBody');
   b.classList.toggle('on', S.bodyOn);
-  b.title = S.gta ? (S.bodyOn ? 'Hide the body' : 'Show a ped body from your GTA V install')
-    : 'GTA V folder not found - click to set it';
+  b.title = S.gta ? (S.bodyOn ? t('Hide the body') : t('Show a ped body from your GTA V install'))
+    : t('GTA V folder not found - click to set it');
 }
 
 async function applyBody(item) {
@@ -698,12 +993,12 @@ async function applyBody(item) {
   let data = S.body[item.gender];
   if (!data) {
     try {
-      setMsg('Reading GTA V body (first time can take a few seconds)…');
+      setMsg(t('Reading GTA V body (first time can take a few seconds)…'));
       data = await api.bodyLoad(item.gender);
       S.body[item.gender] = data;
     } catch (e) {
       console.error(e);
-      toast('Body unavailable: ' + (e.message || e), 'warn', 9000);
+      toast(t('Body unavailable: {error}', { error: e.message || e }), 'warn', 9000);
       S.bodyOn = false; updateBodyButton(); viewer.showBody(false);
       return null;
     }
@@ -717,9 +1012,9 @@ async function applyBody(item) {
 async function toggleBody() {
   if (!S.gta) {
     const go = await modal({
-      title: 'GTA V folder not found',
-      lines: ['The body is read straight from your own GTA V install (legacy edition). Nothing is copied or saved.', 'Choose the folder that contains GTA5.exe.'],
-      buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'ok', label: 'Choose folder…', accent: true }],
+      title: t('GTA V folder not found'),
+      lines: [t('The body is read straight from your own GTA V install (legacy edition). Nothing is copied or saved.'), t('Choose the folder that contains GTA5.exe.')],
+      buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'ok', label: t('Choose folder…'), accent: true }],
     });
     if (go !== 'ok') return;
     try {
@@ -741,11 +1036,11 @@ async function selectVariant(item, variant) {
   if (!textSettle()) return;                           // text you are still typing goes onto the piece you typed it for
   S.busy = true;
   try {
-    setMsg('Loading…');
+    setMsg(t('Loading…'));
     let entry = S.docs.get(variant.ytd);
     if (!entry) {
       const tex = await api.loadTexture(variant.ytd);
-      const doc = Paint.docFromRGBA(tex.width, tex.height, tex.rgba, 'Original');
+      const doc = Paint.docFromRGBA(tex.width, tex.height, tex.rgba, t('Original'));
       entry = { item, variant, ytd: variant.ytd, doc, tex: { name: tex.name, format: tex.format, mips: tex.mips, width: tex.width, height: tex.height } };
       entry.preview = makePreviewCanvas(tex.width, tex.height);
       S.docs.set(variant.ytd, entry);
@@ -764,7 +1059,7 @@ async function selectVariant(item, variant) {
 
     S.sel = entry;
     Paint.setDoc(entry.doc);
-    if (!entry.doc.guide && entry.uv) { Paint.setGuide(entry.uv); applyGuideControls(); }
+    if (!entry.doc.guide && entry.uv) { Paint.setGuide(entry.uv); entry.doc.guide.uv = true; applyGuideControls(); }     // .uv: this guide is the model's UV map, drawn again at the right size after a resize
     syncGuideControls();
 
     const bodyData = await applyBody(item);
@@ -774,17 +1069,17 @@ async function selectVariant(item, variant) {
     Paint.flatInto(entry.preview);
     viewer.refresh();
 
-    $('#current').textContent = `${item.gender === 'male' ? 'Male' : 'Female'} · ${item.label} · ${variant.letter}`;
-    $('#stSize').textContent = `${entry.tex.width}×${entry.tex.height} ${entry.tex.format}${entry.tex.mips > 1 ? ' · ' + entry.tex.mips + ' mips' : ''}`;
-    $('#empty').hidden = true;
-    $('#vInfo').textContent = drawable ? `${Math.round(tris).toLocaleString()} triangles · drag to orbit · wheel to zoom` : 'No model found for this piece (texture only).';
-    S.last = { item, drawable: drawable || null, bone, bodyData };
+    $('#current').textContent = currentLabel();
+    showTexSize(entry);
+    $('#empty').hidden = true; S.emptyMsg = null;
+    S.last = { item, drawable: drawable || null, bone, bodyData, tris };
+    updateViewInfo();
     pushPopout();
     fit();
     renderTree();
     const openRow = $('#tree .tree-item.sel');                      // keep the piece you opened in view
     if (openRow) openRow.scrollIntoView({ block: 'nearest' });
-    setMsg(`Editing ${basename(variant.ytd)}`);
+    setMsg(t('Editing {file}', { file: basename(variant.ytd) }));
   } catch (e) {
     console.error(e);
     toast(String(e.message || e), 'error', 9000);
@@ -792,6 +1087,14 @@ async function selectVariant(item, variant) {
   } finally {
     S.busy = false;
   }
+}
+
+/** The line under the 3D view: how big the model is, or why there is none. */
+function updateViewInfo() {
+  const l = S.last;
+  $('#vInfo').textContent = !S.sel || !l ? ''
+    : l.drawable ? tn(Math.round(l.tris), '{n} triangle · drag to orbit · wheel to zoom', '{n} triangles · drag to orbit · wheel to zoom', { n: Math.round(l.tris).toLocaleString(getLanguage()) })
+      : t('No model found for this piece (texture only).');
 }
 
 // ---------------------------------------------------------------- live 3D update
@@ -815,7 +1118,7 @@ function setFull(on) {
   const p = $('#viewerPanel');
   p.classList.toggle('fs', S.fs);
   $('#vFull').classList.toggle('on', S.fs);
-  $('#vFull').textContent = S.fs ? 'Exit' : 'Full';
+  $('#vFull').textContent = S.fs ? t('Exit') : t('Full');
   if (api.setFullscreen) api.setFullscreen(S.fs).catch(() => { /* the panel still fills the window */ });
   requestAnimationFrame(() => viewer.resize());
 }
@@ -824,7 +1127,7 @@ const toggleFullscreen = () => setFull(!S.fs);
 function updatePopButton() {
   const b = $('#vPop');
   b.classList.toggle('on', S.pop);
-  b.title = S.pop ? 'Close the 3D pop-out window' : 'Open the 3D view in its own window - drag it to another monitor. It keeps updating live while you paint.';
+  b.title = S.pop ? t('Close the 3D pop-out window') : t('Open the 3D view in its own window - drag it to another monitor. It keeps updating live while you paint.');
 }
 
 /** Send the whole scene (mesh, body, which parts are hidden) to the pop-out. The body goes only once per gender. */
@@ -864,12 +1167,12 @@ async function togglePopout() {
   if (S.pop) { await api.viewerClose(); return; }
   try {
     const r = await api.viewerOpen();
-    if (r && r.blocked) toast('The pop-up window was blocked.', 'warn');
+    if (r && r.blocked) toast(t('The pop-up window was blocked.'), 'warn');
     else if (r && !r.reused) {
-      toast(r.onOther ? 'The 3D view is open on your other monitor. Double-click it (or press F11 there) for full screen.'
-        : 'The 3D view is open in its own window. Drag it to your other monitor, then double-click it for full screen.', 'ok', 7000);
+      toast(r.onOther ? t('The 3D view is open on your other monitor. Double-click it (or press F11 there) for full screen.')
+        : t('The 3D view is open in its own window. Drag it to your other monitor, then double-click it for full screen.'), 'ok', 7000);
     }
-  } catch (e) { toast('Could not open the 3D window: ' + (e.message || e), 'error', 8000); }
+  } catch (e) { toast(t('Could not open the 3D window: {error}', { error: e.message || e }), 'error', 8000); }
 }
 
 let treeQueued = false;
@@ -894,7 +1197,7 @@ const iconSpan = (cls, svg) => { const s = el('span', cls); s.innerHTML = svg; r
 async function renameLayer(i) {
   const L = Paint.doc && Paint.doc.layers[i];
   if (!L) return;
-  const v = await askText('Rename layer', L.name);
+  const v = await askText(t('Rename layer'), L.name);
   if (v && v.trim()) Paint.layerOp.set(i, 'name', v.trim());
 }
 
@@ -903,24 +1206,30 @@ function renderLayers() {
   list.textContent = '';
   if (!d) { syncLayerTools(); return; }
   for (let i = d.layers.length - 1; i >= 0; i--) {
-    const L = d.layers[i];
-    const row = el('div', 'layer' + (i === d.active ? ' active' : '') + (L.locked ? ' locked' : ''));
+    const L = d.layers[i], clipped = L.clip && i > 0;
+    const row = el('div', 'layer' + (i === d.active ? ' active' : '') + (L.locked ? ' locked' : '') + (clipped ? ' clipped' : ''));
+    if (clipped) {
+      const mark = el('span', 'clipmark', '↳');
+      mark.title = t('Clipped to the layer below: it only shows where that layer has pixels. Click to unclip.');
+      mark.onclick = (e) => { e.stopPropagation(); Paint.layerOp.set(i, 'clip', false); };
+      row.append(mark);
+    }
     const eye = iconSpan('eye' + (L.visible ? '' : ' off'), L.visible ? LAYER_ICON.eye : LAYER_ICON.eyeOff);
-    eye.title = L.visible ? 'Showing. Click to hide this layer.' : 'Hidden. Click to show this layer.';
+    eye.title = L.visible ? t('Showing. Click to hide this layer.') : t('Hidden. Click to show this layer.');
     eye.onclick = (e) => { e.stopPropagation(); Paint.layerOp.set(i, 'visible', !L.visible); };
     const lock = iconSpan('lock' + (L.locked ? ' on' : ''), L.locked ? LAYER_ICON.lock : LAYER_ICON.unlock);
-    lock.title = L.locked ? 'Locked. Click to unlock this layer.' : 'Click to lock this layer so it cannot be changed by accident.';
+    lock.title = L.locked ? t('Locked. Click to unlock this layer.') : t('Click to lock this layer so it cannot be changed by accident.');
     lock.onclick = (e) => { e.stopPropagation(); Paint.layerOp.set(i, 'locked', !L.locked); };
     const th = document.createElement('canvas');
     th.width = 42; th.height = 30; th.dataset.layer = i;
     const name = el('span', 'lname', L.name);
-    name.title = 'Double-click to rename';
+    name.title = t('Double-click to rename');
     name.ondblclick = () => renameLayer(i);
     row.onclick = () => Paint.layerOp.select(i);
     row.append(eye, lock, th, name);
     if (L.text) {                                           // live text: still editable
       const tb = el('span', 'tbadge', 'T');
-      tb.title = 'Live text. Double-click it to edit, or click the text on the texture with the Text tool (T).';
+      tb.title = t('Live text. Double-click it to edit, or click the text on the texture with the Text tool (T).');
       tb.ondblclick = th.ondblclick = (e) => { e.stopPropagation(); textEditLayer(i); };
       row.append(tb);
     }
@@ -944,16 +1253,23 @@ function syncLayerTools() {
   off('#lLock', !A); off('#lMerge', !A || i === 0); off('#lRename', !A); off('#lDel', !A);
   const locked = !!(A && A.locked);
   $('#lLock').classList.toggle('on', locked);
-  $('#lLock span').textContent = locked ? 'Unlock' : 'Lock';
+  $('#lLock span').textContent = locked ? t('Unlock') : t('Lock');
   $('#lLock svg').innerHTML = (locked ? LAYER_ICON.lock : LAYER_ICON.unlock).replace(/^<svg[^>]*>|<\/svg>$/g, '');
-  $('#lLock').title = locked ? 'Unlock the selected layer so it can be painted on, moved and deleted again' : 'Lock the selected layer so it cannot be painted on, moved, resized, merged or deleted by accident';
-  $('#lDel span').textContent = n === 1 ? 'Clear' : 'Delete';
-  $('#lDel').title = n === 1 ? 'Erase everything on the only layer (Undo brings it back)' : 'Delete the selected layer (Undo brings it back)';
-  $('#lMerge').title = A && i > 0 ? `Merge: join the selected layer into "${d.layers[i - 1].name}" below it, so they become one layer (Ctrl+E)` : 'Merge: there is no layer below to join this one into';
-  $('#lUp').title = A && i >= n - 1 ? 'Up: this is already the top layer' : 'Move the selected layer up, in front of the one above it (Ctrl+])';
-  $('#lDown').title = A && i <= 0 ? 'Down: this is already the bottom layer' : 'Move the selected layer down, behind the one below it (Ctrl+[)';
-  $('#lDup').title = 'Duplicate: make a copy of the selected layer (Ctrl+J). A text layer stays editable.';
+  $('#lLock').title = locked ? t('Unlock the selected layer so it can be painted on, moved and deleted again') : t('Lock the selected layer so it cannot be painted on, moved, resized, merged or deleted by accident');
+  $('#lDel span').textContent = n === 1 ? t('Clear') : t('Delete');
+  $('#lDel').title = n === 1 ? t('Erase everything on the only layer (Undo brings it back)') : t('Delete the selected layer (Undo brings it back)');
+  $('#lMerge').title = A && i > 0 ? t('Merge: join the selected layer into "{name}" below it, so they become one layer (Ctrl+E)', { name: d.layers[i - 1].name }) : t('Merge: there is no layer below to join this one into');
+  $('#lUp').title = A && i >= n - 1 ? t('Up: this is already the top layer') : t('Move the selected layer up, in front of the one above it (Ctrl+])');
+  $('#lDown').title = A && i <= 0 ? t('Down: this is already the bottom layer') : t('Move the selected layer down, behind the one below it (Ctrl+[)');
+  $('#lDup').title = t('Duplicate: make a copy of the selected layer (Ctrl+J). A text layer stays editable.');
   $('#lCount').textContent = d ? `(${n})` : '';
+  const clip = $('#lClip'), clipped = !!(A && A.clip && i > 0);
+  clip.disabled = !A || i === 0;
+  clip.classList.toggle('on', clipped);
+  clip.title = !A || i === 0 ? t('Clip: the bottom layer has nothing below it to clip to')
+    : clipped ? t('Clipped: "{name}" only shows where the layer below has pixels. Click to unclip (Ctrl+G).', { name: A.name })
+      : t('Clip to the layer below: "{name}" then only shows where that layer has pixels, like a clipping mask in Photoshop (Ctrl+G)', { name: A.name });
+  $('#lFabric').disabled = !A;
 }
 
 function refreshThumbs() {
@@ -1195,9 +1511,9 @@ function ensureTransform(announce) {
   const ok = Paint.xformBegin();
   if (!ok && announce) {
     const L = Paint.doc.layers[Paint.doc.active];
-    toast(L.locked ? 'This layer is locked. Unlock it (padlock in the Layers list) to resize it.'
-      : !L.visible ? 'This layer is hidden. Show it to resize it.'
-        : 'This layer has nothing on it yet, so there is nothing to resize. Pick a layer with an image, or import one.', 'warn', 6000);
+    toast(L.locked ? t('This layer is locked. Unlock it (padlock in the Layers list) to resize it.')
+      : !L.visible ? t('This layer is hidden. Show it to resize it.')
+        : t('This layer has nothing on it yet, so there is nothing to resize. Pick a layer with an image, or import one.'), 'warn', 6000);
   }
 }
 
@@ -1238,7 +1554,7 @@ function syncXformUi() {
   let note = '';
   if (!st && Paint.doc && Paint.opts.tool === 'transform') {
     const L = Paint.doc.layers[Paint.doc.active];
-    note = L.locked ? 'This layer is locked.' : !L.visible ? 'This layer is hidden.' : 'This layer is empty - nothing to resize.';
+    note = L.locked ? t('This layer is locked.') : !L.visible ? t('This layer is hidden.') : t('This layer is empty - nothing to resize.');
   }
   $('#xfNote').textContent = note;
   drawHandles();
@@ -1385,8 +1701,8 @@ function textBegin(x, y, layerIndex) {
 function textEditLayer(index) {
   const d = Paint.doc, L = d && d.layers[index];
   if (!L || !L.text) return false;
-  if (L.locked) { toast('That text layer is locked. Unlock it (padlock in the Layers list) to change the text.', 'warn'); return false; }
-  if (!L.visible) { toast('That text layer is hidden. Show it first.', 'warn'); return false; }
+  if (L.locked) { toast(t('That text layer is locked. Unlock it (padlock in the Layers list) to change the text.'), 'warn'); return false; }
+  if (!L.visible) { toast(t('That text layer is hidden. Show it first.'), 'warn'); return false; }
   if (!textSettle()) return false;
   const i = d.layers.indexOf(L);                           // placing text that was still open may have added a layer above
   if (i < 0) return false;
@@ -1397,7 +1713,7 @@ function textEditLayer(index) {
   setColor(m.color, false);
   const op = $('#oOpac'); op.value = Math.round((m.opacity == null ? 1 : m.opacity) * 100); op.dispatchEvent(new Event('input'));
   textBegin(m.x, m.y, i);
-  setMsg('Editing the text: type, or change the font and style above. Ctrl+Enter or a click elsewhere keeps it · Esc throws your changes away');
+  setMsg(t('Editing the text: type, or change the font and style above. Ctrl+Enter or a click elsewhere keeps it · Esc throws your changes away'));
   return true;
 }
 
@@ -1411,7 +1727,7 @@ function textEnd(commit) {
     if (i >= 0) {
       if (commit) {
         if (!Paint.updateTextLayer(i, o, T.x, T.y)) return false;
-        if (!String(o.text).trim()) toast('The text was empty, so its layer was removed. Undo (Ctrl+Z) brings it back.', 'info', 6000);
+        if (!String(o.text).trim()) toast(t('The text was empty, so its layer was removed. Undo (Ctrl+Z) brings it back.'), 'info', 6000);
       } else Paint.setEditing(i, false);
     }
     T.layer.editing = false;
@@ -1501,7 +1817,7 @@ async function openFontMenu() {
   if ($('#fontMenu')) return;                               // a second click got here first
   const btn = $('#oFont'), r = btn.getBoundingClientRect();
   const m = el('div'); m.id = 'fontMenu';
-  const q = el('input'); q.type = 'search'; q.placeholder = 'Search, or type any font name…'; q.spellcheck = false; q.autocomplete = 'off';
+  const q = el('input'); q.type = 'search'; q.placeholder = t('Search, or type any font name…'); q.spellcheck = false; q.autocomplete = 'off';
   const list = el('div', 'fm-list');
   m.append(q, list);
   let shown = [], hot = 0;
@@ -1517,7 +1833,8 @@ async function openFontMenu() {
       list.append(it);
     });
     if (f && !shown.some((n) => n.toLowerCase() === f)) {
-      list.append(el('div', 'fm-custom', `Enter = use "${q.value.trim()}" as typed` + (fontInstalled(q.value.trim()) ? '' : ' (not found on this PC, so a default font shows)')));
+      const typed = q.value.trim();
+      list.append(el('div', 'fm-custom', fontInstalled(typed) ? t('Enter = use "{font}" as typed', { font: typed }) : t('Enter = use "{font}" as typed (not found on this PC, so a default font shows)', { font: typed })));
     }
   };
   q.oninput = () => { hot = 0; render(); };
@@ -1545,16 +1862,16 @@ async function openFontMenu() {
 
 async function loadFontFile(file) {
   try {
-    const name = file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || 'Custom font';
+    const name = file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || t('Custom font');
     const ff = new FontFace(name, await file.arrayBuffer());
     await ff.load();
     document.fonts.add(ff);
     if (!S.customFonts.includes(name)) S.customFonts.push(name);
     fontNamesP = null;
     chooseFont(name);
-    toast(`Loaded the font "${name}". It stays available until you close the app.`, 'ok', 4000);
+    toast(t('Loaded the font "{name}". It stays available until you close the app.', { name }), 'ok', 4000);
   } catch (err) {
-    toast('That font file could not be loaded: ' + String(err.message || err), 'error', 6000);
+    toast(t('That font file could not be loaded: {error}', { error: String(err.message || err) }), 'error', 6000);
   }
 }
 
@@ -1624,25 +1941,25 @@ const TOOL_SHOW = {
   xform: ['transform'],
 };
 
-function setTool(t) {
+function setTool(tool) {
   const was = Paint.opts.tool;
-  if (t !== 'text' && !textSettle()) return;                 // leaving the Text tool places the text (stays if it cannot be placed)
-  if (was === 'transform' && t !== 'transform') { S.xfDrag = null; Paint.xformEnd(true); } // leaving the Resize tool applies the change
-  Paint.opts.tool = t;
-  for (const b of $$('.tool[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
-  $('#oSize').closest('.opt').hidden = !TOOL_SHOW.size.includes(t);
-  $('#oHard').closest('.opt').hidden = !TOOL_SHOW.hard.includes(t);
-  $('#oOpac').closest('.opt').hidden = !TOOL_SHOW.opac.includes(t);
-  $('#oSym').closest('.opt').hidden = !['brush', 'eraser', 'line', 'rect', 'ellipse'].includes(t);   // mirror painting only means something for these
-  $('[data-for=fill]').hidden = !TOOL_SHOW.tol.includes(t);
-  $('[data-for=shape]').hidden = !TOOL_SHOW.shape.includes(t);
-  $('[data-for=text]').hidden = !TOOL_SHOW.text.includes(t);
-  $('[data-for=xform]').hidden = !TOOL_SHOW.xform.includes(t);
-  $('#viewport').style.cursor = t === 'move' ? 'move' : t === 'transform' ? 'default' : t === 'text' ? 'text' : 'crosshair';
-  if (t === 'text' && was !== 'text') setMsg('Text: click on the texture, then type. Ctrl+Enter places it · Esc cancels · drag ✥ to move it');
-  if (t === 'transform') {
-    ensureTransform(was !== t);
-    if (was !== t) setMsg('Resize: drag a corner to scale · Shift = free stretch · Alt = from the centre · drag the round knob to rotate · Enter applies · Esc cancels');
+  if (tool !== 'text' && !textSettle()) return;              // leaving the Text tool places the text (stays if it cannot be placed)
+  if (was === 'transform' && tool !== 'transform') { S.xfDrag = null; Paint.xformEnd(true); } // leaving the Resize tool applies the change
+  Paint.opts.tool = tool;
+  for (const b of $$('.tool[data-tool]')) b.classList.toggle('active', b.dataset.tool === tool);
+  $('#oSize').closest('.opt').hidden = !TOOL_SHOW.size.includes(tool);
+  $('#oHard').closest('.opt').hidden = !TOOL_SHOW.hard.includes(tool);
+  $('#oOpac').closest('.opt').hidden = !TOOL_SHOW.opac.includes(tool);
+  $('#oSym').closest('.opt').hidden = !['brush', 'eraser', 'line', 'rect', 'ellipse'].includes(tool);   // mirror painting only means something for these
+  $('[data-for=fill]').hidden = !TOOL_SHOW.tol.includes(tool);
+  $('[data-for=shape]').hidden = !TOOL_SHOW.shape.includes(tool);
+  $('[data-for=text]').hidden = !TOOL_SHOW.text.includes(tool);
+  $('[data-for=xform]').hidden = !TOOL_SHOW.xform.includes(tool);
+  $('#viewport').style.cursor = tool === 'move' ? 'move' : tool === 'transform' ? 'default' : tool === 'text' ? 'text' : 'crosshair';
+  if (tool === 'text' && was !== 'text') setMsg(t('Text: click on the texture, then type. Ctrl+Enter places it · Esc cancels · drag ✥ to move it'));
+  if (tool === 'transform') {
+    ensureTransform(was !== tool);
+    if (was !== tool) setMsg(t('Resize: drag a corner to scale · Shift = free stretch · Alt = from the centre · drag the round knob to rotate · Enter applies · Esc cancels'));
   }
   syncXformUi();
 }
@@ -1871,8 +2188,13 @@ function wireLayerPanel() {
   $('#lDel').onclick = act(() => Paint.layerOp.remove());
   S.layerKeys = { j: () => Paint.layerOp.duplicate(), e: () => Paint.layerOp.mergeDown(), ']': () => Paint.layerOp.move(1), '[': () => Paint.layerOp.move(-1) };
   const blend = $('#lBlend');
-  for (const [v, label] of Paint.BLENDS) { const o = el('option', '', label); o.value = v; blend.append(o); }
+  for (const b of Paint.BLENDS) {
+    if (!b) { const o = el('option', 'divider', '──────────'); o.disabled = true; blend.append(o); continue; }   // the groups of Photoshop's list
+    const o = el('option', '', t(b[1])); o.value = b[0]; blend.append(o);
+  }
   blend.onchange = () => Paint.doc && Paint.layerOp.set(Paint.doc.active, 'blend', blend.value);
+  $('#lClip').onclick = act((d) => { if (d.active > 0) Paint.layerOp.set(d.active, 'clip', !d.layers[d.active].clip); });
+  $('#lFabric').onclick = act(() => fabricLook());
   $('#lOpacity').oninput = (e) => {
     if (!Paint.doc) return;
     $('#lOpacityV').textContent = e.target.value;
@@ -1883,13 +2205,212 @@ function wireLayerPanel() {
   $('#lGuideImport').onclick = () => importImage('guide');
 }
 
+// ---------------------------------------------------------------- Fabric look
+// A print pasted on a shirt looks flat because the cloth's folds and weave stop at its edge. Fabric look puts them back on top
+// of it as ordinary layers (change their Opacity / Blend later, or delete them): the folds and creases of the bottom layer (the
+// texture as it came from the .ytd) and a fabric grain, both grey maps blended with Hard light (grey 128 changes nothing) and
+// clipped to the print. It can also bend the print along the folds and change its blend mode (the "ink"). Everything shows
+// live while the dialog is open (Paint.setPreview) and goes into the document as one undo step.
+const GRAIN_LABELS = {
+  cotton: N_('Cotton (plain weave)'), jersey: N_('Jersey knit (T-shirt)'), denim: N_('Denim (twill)'), canvas: N_('Canvas'),
+  mesh: N_('Sports mesh'), fleece: N_('Fleece'), leather: N_('Leather'), noise: N_('Fine grain'),
+};
+const GRAIN_SIZE = { cotton: 3, jersey: 3, denim: 4, canvas: 3, mesh: 4, fleece: 4, leather: 4, noise: 3 };
+const FABRIC_BLENDS = [
+  ['hard-light', N_('Hard light: shading on every colour')],
+  ['overlay', N_('Overlay: strongest on mid tones')],
+  ['soft-light', N_('Soft light: gentle')],
+];
+const INKS = [
+  ['', N_('Leave it as it is')],
+  ['multiply', N_('Multiply: the cloth shows through the ink')],
+  ['source-over', N_('Normal: solid ink')],
+];
+/** The dialog's settings, kept until the app closes. foldSize 0: chosen from the texture's size the first time. */
+const FAB = { folds: true, foldStrength: 70, foldSize: 0, grain: true, grainKind: 'cotton', grainStrength: 30, grainSize: 3, look: 'hard-light', bend: false, bendAmount: 6, ink: '', onlyPrint: true };
+
+async function fabricLook() {
+  const d = Paint.doc;
+  if (!d || !S.sel) { toast(t('Pick a piece first.'), 'warn'); return; }
+  if (!textSettle()) return;
+  if (Paint.xf) Paint.xformEnd(true);                  // a resize that is still open is applied first
+  const w = d.w, h = d.h, ai = d.active;
+  let print = ai;                                      // the print: the selected layer, or the one a selected clipped layer belongs to
+  while (print > 0 && d.layers[print].clip) print--;
+  const P = d.layers[print], hasPrint = print > 0, canBend = hasPrint && !P.locked, oldInk = P.blend;
+  if (!FAB.foldSize) FAB.foldSize = clamp(Math.round(Math.max(w, h) / 128), 2, 32);
+
+  // the maps, each made once per setting while the dialog is open
+  const cache = new Map();
+  const cached = (key, make) => { if (!cache.has(key)) cache.set(key, make()); return cache.get(key); };
+  let base = null, printPx = null;
+  const folds = (size) => cached('f' + size, () => foldsMap(base || (base = Paint.layerRGBA(0)), w, h, { size }).rgba);
+  const grain = (kind, size) => cached(`g${kind}|${size}`, () => grainMap(kind, w, h, { size }).rgba);
+  const bent = (size, amount) => cached(`b${size}|${amount}`, () => bend(printPx || (printPx = Paint.layerRGBA(print)), w, h, folds(size), amount));
+
+  const foldLayer = Paint.makeLayer(null, { name: t('Fabric folds') }), grainLayer = Paint.makeLayer(null, {});
+  const bentCanvas = Paint.makeLayer(null, {}).canvas;
+  const put = (canvas, rgba) => canvas.getContext('2d').putImageData(new ImageData(rgba, w, h), 0, 0);
+  const shown = { fold: '', grain: '', bent: '' };
+  const plan = () => {                                 // what Add does with the settings as they are now
+    const only = hasPrint && FAB.onlyPrint;
+    return {
+      only, after: only ? ai : d.layers.length - 1,
+      layers: [FAB.grain && grainLayer, FAB.folds && foldLayer].filter(Boolean),
+      bend: canBend && only && FAB.bend && FAB.bendAmount > 0,
+      ink: hasPrint && FAB.ink && FAB.ink !== oldInk ? FAB.ink : null,
+    };
+  };
+  let sync = () => {};
+  function refresh() {
+    const p = plan();
+    if (FAB.folds && shown.fold !== String(FAB.foldSize)) { put(foldLayer.canvas, folds(FAB.foldSize)); shown.fold = String(FAB.foldSize); }
+    const gk = FAB.grainKind + '|' + FAB.grainSize;
+    if (FAB.grain && shown.grain !== gk) { put(grainLayer.canvas, grain(FAB.grainKind, FAB.grainSize)); shown.grain = gk; }
+    foldLayer.opacity = FAB.foldStrength / 100; grainLayer.opacity = FAB.grainStrength / 100;
+    foldLayer.blend = grainLayer.blend = FAB.look; foldLayer.clip = grainLayer.clip = p.only;
+    grainLayer.name = t('Fabric grain: {kind}', { kind: t(GRAIN_LABELS[FAB.grainKind]) });
+    let replace = null;
+    if (p.bend) {
+      const bk = FAB.foldSize + '|' + FAB.bendAmount;
+      if (shown.bent !== bk) { put(bentCanvas, bent(FAB.foldSize, FAB.bendAmount)); shown.bent = bk; }
+      replace = { i: print, canvas: bentCanvas };
+    }
+    P.blend = p.ink || oldInk;                          // the ink shows live; the old one is back before the real change, so Undo has it
+    Paint.setPreview({ after: p.after, layers: p.layers, replace });
+    onChange({ final: false });
+    setMsg('');
+    sync();
+  }
+  let queued = false;
+  const update = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; refresh(); }, 16); };
+
+  // ---- the dialog
+  const box = el('div', 'fab');
+  box.append(el('p', '', hasPrint
+    ? t('Makes "{name}" look printed on the cloth: the folds and the weave of the fabric show on it. They are added as layers you can change or delete later.', { name: P.name })
+    : t('Adds the folds and the weave of the fabric over the whole texture. To put them on a print only, select the print\'s layer first.')));
+  const row = (label, input, value) => { const r = el('div', 'fab-row'); r.append(el('label', '', label), input); if (value) r.append(value); return r; };
+  const slider = (label, min, max, key, unit, heavy) => {
+    const inp = el('input'), val = el('span', 'val');
+    inp.type = 'range'; inp.min = min; inp.max = max; inp.step = 1; inp.value = FAB[key];
+    const show = () => { val.textContent = inp.value + unit; };
+    show();
+    inp.addEventListener('input', () => { show(); if (!heavy) { FAB[key] = +inp.value; update(); } });
+    inp.addEventListener('change', () => { FAB[key] = +inp.value; update(); });     // a new map is made when the slider is let go
+    return { r: row(label, inp, val), inp, show };
+  };
+  const choice = (label, options, key, then) => {
+    const s = el('select');
+    for (const [v, label] of options) { const o = el('option', '', t(label)); o.value = v; s.append(o); }
+    s.value = FAB[key];
+    s.onchange = () => { FAB[key] = s.value; if (then) then(); update(); };
+    return row(label, s);
+  };
+  const section = (label, key, note) => {
+    const lab = el('label', 'fab-check'), cb = el('input'), part = el('div', 'fab-part');
+    cb.type = 'checkbox'; cb.checked = !!FAB[key];
+    cb.onchange = () => { FAB[key] = cb.checked; update(); };
+    lab.append(cb, document.createTextNode(' ' + label));
+    if (note) part.append(el('div', 'fab-note', note));
+    box.append(lab, part);
+    return { cb, part };
+  };
+
+  const fSec = section(t('Folds and creases'), 'folds', t('Taken from "{name}", the texture under your painting.', { name: d.layers[0].name }));
+  fSec.part.append(slider(t('Strength'), 0, 100, 'foldStrength', ' %').r, slider(t('Fold size'), 1, 48, 'foldSize', ' px', true).r);
+  const gSec = section(t('Fabric grain'), 'grain');
+  const gSize = slider(t('Grain size'), 1, 16, 'grainSize', ' px', true);
+  gSec.part.append(
+    choice(t('Fabric'), GRAINS.map((k) => [k, GRAIN_LABELS[k]]), 'grainKind', () => { FAB.grainSize = GRAIN_SIZE[FAB.grainKind]; gSize.inp.value = FAB.grainSize; gSize.show(); }),
+    slider(t('Strength'), 0, 100, 'grainStrength', ' %').r, gSize.r);
+  box.append(choice(t('Blend'), FABRIC_BLENDS, 'look'));
+  const bSec = section(t('Bend the print with the folds'), 'bend', !hasPrint ? t('Select the layer with your print to bend it.')
+    : P.locked ? t('"{name}" is locked. Unlock it to bend it.', { name: P.name })
+      : P.text ? t('"{name}" is live text: bending turns it into plain pixels (Undo brings the text back).', { name: P.name })
+        : t('Moves the pixels of "{name}" along the creases, like Photoshop\'s Displace filter. Best done last, after the print is in place.', { name: P.name }));
+  bSec.part.append(slider(t('Amount'), 1, 30, 'bendAmount', ' px', true).r);
+  if (hasPrint) {
+    box.append(choice(t('Ink'), INKS, 'ink'));
+    const where = el('div', 'fab-apply');
+    for (const [only, text] of [[true, t('Only on "{name}" (clipped to it)', { name: P.name })], [false, t('On the whole texture')]]) {
+      const lab = el('label'), r = el('input');
+      r.type = 'radio'; r.name = 'fabWhere'; r.checked = FAB.onlyPrint === only;
+      r.onchange = () => { FAB.onlyPrint = only; update(); };
+      lab.append(r, document.createTextNode(' ' + text));
+      where.append(lab);
+    }
+    box.append(row(t('Apply to'), where));
+  }
+  sync = () => {                                      // grey out what is switched off; Bend needs a print of its own
+    const bendable = canBend && FAB.onlyPrint;
+    fSec.part.classList.toggle('off', !FAB.folds);
+    gSec.part.classList.toggle('off', !FAB.grain);
+    bSec.cb.disabled = !bendable; bSec.cb.checked = bendable && FAB.bend;
+    bSec.part.classList.toggle('off', !(bendable && FAB.bend));
+  };
+
+  const answer = modal({ title: t('Fabric look'), content: box, side: true, buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'ok', label: t('Add'), accent: true }] });
+  setMsg(t('Making the fabric maps…'));
+  update();
+  const r = await answer;
+  if (r === 'ok') refresh();                           // a slider let go just before OK is in too
+  P.blend = oldInk;
+  const p = plan();
+  if (r !== 'ok' || (!p.layers.length && !p.bend && !p.ink)) { Paint.setPreview(null); onChange({ final: true }); setMsg(''); return; }
+  Paint.insertLayers({
+    after: p.after, layers: p.layers,
+    replace: p.bend ? { i: print, rgba: bent(FAB.foldSize, FAB.bendAmount) } : null,
+    blend: p.ink ? { i: print, mode: p.ink } : null,
+  });
+  toast(t('Fabric look added. Fine-tune it with the Opacity and Blend of its layers, or delete them.'), 'ok', 7000);
+}
+
 // ---------------------------------------------------------------- import / export / save
+/**
+ * "This is bigger than the texture": keep the texture's size (what comes in is scaled down), or make the texture bigger.
+ * { intro, keepNote, growNote }: the three sentences that differ between an image and a saved project; d: the open document;
+ * sizes: what growSizes offers. Answers null (Cancel), 'keep' or { w, h }.
+ */
+async function askBigger({ intro, keepNote, growNote }, d, sizes) {
+  const fmt = (S.sel && S.sel.tex.format) || 'DXT1', cur = `${d.w}×${d.h}`;
+  const check = { label: t('Always keep the texture size, do not ask again (until the app is restarted)'), value: false };
+  const r = await modal({
+    title: t('Bigger than the texture'),
+    lines: [
+      intro,
+      sentences(keepNote, growNote),
+      memoryLine(d.w, d.h, fmt, sizes),
+    ],
+    check,
+    buttons: [{ id: 'cancel', label: t('Cancel') }, { id: 'keep', label: t('Keep {size}', { size: cur }), accent: true },
+      ...sizes.map((s) => ({ id: `s${s.w}x${s.h}`, label: t('Resize to {size}', { size: `${s.w}×${s.h}` }) }))],
+  });
+  if (!r) return null;
+  if (r === 'keep') { if (check.value) S.keepSize = true; return 'keep'; }
+  const m = /^s(\d+)x(\d+)$/.exec(r);
+  return { w: +m[1], h: +m[2] };
+}
+
 async function importFromDataUrl(url, mode, name) {
-  if (!Paint.doc) { toast('Pick a piece first.', 'warn'); return; }
+  if (!Paint.doc) { toast(t('Pick a piece first.'), 'warn'); return; }
   const img = await Paint.loadImage(url);
   if (mode === 'guide') { Paint.setGuide(img); applyGuideControls(); }
   else {
-    Paint.addImageLayer(img, { name: name || 'Image', fit: 'contain', maxFraction: 0.6 });
+    let native = false;
+    const d = Paint.doc, iw = img.naturalWidth, ih = img.naturalHeight;
+    const sizes = S.sel && !S.keepSize ? growSizes(d.w, d.h, iw, ih) : [];
+    if (sizes.length) {                                              // bigger than the texture: keep its size, or make the texture bigger (like Paint.NET's canvas question)
+      const cur = `${d.w}×${d.h}`;
+      const pick = await askBigger({
+        intro: name ? t('"{name}" is {size}, bigger than this texture ({cur}).', { name, size: `${iw}×${ih}`, cur }) : t('This image is {size}, bigger than this texture ({cur}).', { size: `${iw}×${ih}`, cur }),
+        keepNote: t('Keep {cur} and the image is scaled down to fit.', { cur }),
+        growNote: t('Or make the texture bigger so the image keeps its detail: what you have painted is scaled up with it, Undo brings the old size back, and the .ytd only changes when you press Save to YTD.'),
+      }, d, sizes);
+      if (!pick) return;                                             // Cancel: nothing is imported
+      if (pick !== 'keep') { if (!resizeTextureTo(pick.w, pick.h)) return; native = true; }
+    }
+    Paint.addImageLayer(img, { name: name || t('Image'), fit: 'contain', maxFraction: 0.6, native });      // native: after a resize the image goes in at its own pixels
     setTool('transform');   // straight into resize mode so the new image can be sized and placed
   }
 }
@@ -1903,64 +2424,84 @@ async function importImage(mode) {
 
 async function saveToYtd() {
   const e = S.sel;
-  if (!e) { toast('Pick a piece first.', 'warn'); return; }
+  if (!e) { toast(t('Pick a piece first.'), 'warn'); return; }
   if (!textSettle()) return;                          // text you are still typing is part of the painting
   const name = basename(e.ytd);
   const rgba = Paint.flatRGBA(e.doc);                 // this piece's pixels, taken now: whatever is selected while the dialog is open
-  const ok = await confirmBox('Write painting into the YTD', [
-    `This overwrites ${name}`,
-    `${e.tex.width}×${e.tex.height} ${e.tex.format}${e.tex.mips > 1 ? ', ' + e.tex.mips + ' mips are regenerated' : ''}.`,
-    `The first time, the untouched original is kept as ${name}.bak next to it.`,
-  ], 'Write to YTD');
+  const w = e.doc.w, h = e.doc.h, resizing = w !== e.tex.width || h !== e.tex.height;       // the painting was given a new size: the .ytd is rewritten at that size
+  const ok = await confirmBox(t('Write painting into the YTD'), resizing ? [
+    t('This overwrites {name}', { name }),
+    t('The texture changes size: {from} → {to} {fmt}. Its mip levels are regenerated.', { from: `${e.tex.width}×${e.tex.height}`, to: `${w}×${h}`, fmt: e.tex.format }),
+    t('In game it then takes about {to} instead of {from}.', { to: mbText(memoryMB(w, h, e.tex.format)), from: mbText(memoryMB(e.tex.width, e.tex.height, e.tex.format)) }),
+    t('The first time, the untouched original ({size}) is kept as {name}.bak next to it.', { size: `${e.tex.width}×${e.tex.height}`, name }),
+  ] : [
+    t('This overwrites {name}', { name }),
+    e.tex.mips > 1 ? t('{size} {fmt}, {mips} mips are regenerated.', { size: `${e.tex.width}×${e.tex.height}`, fmt: e.tex.format, mips: e.tex.mips }) : `${e.tex.width}×${e.tex.height} ${e.tex.format}.`,
+    t('The first time, the untouched original is kept as {name}.bak next to it.', { name }),
+  ], t('Write to YTD'));
   if (!ok) return;
   try {
-    setMsg('Encoding…');
-    const res = await api.saveTexture(e.ytd, new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength));
+    setMsg(t('Encoding…'));
+    const res = await api.saveTexture(e.ytd, new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength), resizing ? { width: w, height: h } : undefined);
     e.doc.dirty = false;
+    if (resizing) { e.tex.width = w; e.tex.height = h; e.tex.mips = res.mips || e.tex.mips; showTexSize(e); }       // the file really has that size now
     renderTree();
-    toast(`Saved ${name}${res.backup ? ' (backup: ' + basename(res.backup) + ')' : ''}. Restart or refresh the resource on your server to see it.`, 'ok', 8000);
+    toast(res.backup ? t('Saved {name} (backup: {backup}). Restart or refresh the resource on your server to see it.', { name, backup: basename(res.backup) }) : t('Saved {name}. Restart or refresh the resource on your server to see it.', { name }), 'ok', 8000);
   } catch (err) {
-    toast('Save failed: ' + (err.message || err), 'error', 10000);
+    toast(t('Save failed: {error}', { error: err.message || err }), 'error', 10000);
   } finally { setMsg(''); }
 }
 
 async function exportPng() {
-  if (!Paint.doc || !S.sel) { toast('Pick a piece first.', 'warn'); return; }
+  if (!Paint.doc || !S.sel) { toast(t('Pick a piece first.'), 'warn'); return; }
   if (!textSettle()) return;
   try {
     const where = await api.savePng(`${basename(S.sel.ytd).replace(/\.ytd$/i, '').replace(/\^/g, '__')}.png`, Paint.flat(1).toDataURL('image/png'));
-    if (where) toast('Exported ' + where, 'ok');
+    if (where) toast(t('Exported {where}', { where }), 'ok');
   } catch (e) { toast(String(e.message || e), 'error'); }
 }
 
 async function saveProject() {
-  if (!Paint.doc || !S.sel) { toast('Pick a piece first.', 'warn'); return; }
+  if (!Paint.doc || !S.sel) { toast(t('Pick a piece first.'), 'warn'); return; }
   if (!textSettle()) return;
   try {
     const data = { app: 'ClothingStudio', ytd: basename(S.sel.ytd), doc: Paint.serialize() };
     const where = await api.saveProject(`${basename(S.sel.ytd).replace(/\.ytd$/i, '').replace(/\^/g, '__')}.csproj`, JSON.stringify(data));
-    if (where) toast('Saved layers to ' + where, 'ok');
+    if (where) toast(t('Saved layers to {where}', { where }), 'ok');
   } catch (e) { toast(String(e.message || e), 'error'); }
 }
 
 async function openProject() {
-  if (!S.sel) { toast('Pick a piece first.', 'warn'); return; }
+  if (!S.sel) { toast(t('Pick a piece first.'), 'warn'); return; }
   if (!textSettle()) return;
   try {
     const text = await api.openProject();
     if (!text) return;
     const data = JSON.parse(text);
-    if (data.app !== 'ClothingStudio' || !data.doc) throw new Error('That is not a ClothingStudio project.');
+    if (data.app !== 'ClothingStudio' || !data.doc) throw new Error(t('That is not a ClothingStudio project.'));
     if (data.ytd !== basename(S.sel.ytd) &&
-        !(await confirmBox('Different texture', [`This project was saved for ${data.ytd}, but you are editing ${basename(S.sel.ytd)}.`, 'Load it anyway? Layers are scaled to fit.'], 'Load anyway'))) return;
-    const doc = await Paint.deserialize(data.doc, S.sel.doc.w, S.sel.doc.h);
+        !(await confirmBox(t('Different texture'), [t('This project was saved for {saved}, but you are editing {current}.', { saved: data.ytd, current: basename(S.sel.ytd) }), t('Load it anyway? Layers are scaled to fit.')], t('Load anyway')))) return;
+    const was = S.sel.doc;
+    let w = was.w, h = was.h;
+    const sizes = S.keepSize ? [] : growSizes(w, h, Number(data.doc.w), Number(data.doc.h));
+    if (sizes.length) {                                              // saved at a bigger resolution than the texture has now: do not shrink it without asking
+      const pick = await askBigger({
+        intro: t('These layers were saved at {saved}, bigger than this texture ({cur}).', { saved: `${data.doc.w}×${data.doc.h}`, cur: `${w}×${h}` }),
+        keepNote: t('Keep {cur} and the layers are scaled down (live text becomes plain pixels).', { cur: `${w}×${h}` }),
+        growNote: t('Or make the texture bigger: the layers load as they were saved, live text included. The .ytd only changes when you press Save to YTD.'),
+      }, was, sizes);
+      if (!pick) return;
+      if (pick !== 'keep') { w = pick.w; h = pick.h; }
+    }
+    const doc = await Paint.deserialize(data.doc, w, h);
     doc.dirty = true;
-    doc.guide = S.sel.doc.guide;
+    doc.guide = was.guide;
     S.sel.doc = doc;
     Paint.setDoc(doc);
+    if (w !== was.w || h !== was.h) onDocResized();                  // UV lines, 3D copy, status text and zoom for the new size
     Paint.flatInto(S.sel.preview); viewer.refresh(); queuePopTex();
     renderTree(); fit();
-    toast('Layers loaded.', 'ok');
+    toast(t('Layers loaded.'), 'ok');
   } catch (e) { toast(String(e.message || e), 'error', 8000); }
 }
 
@@ -1972,7 +2513,7 @@ function wireDrop() {
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', async (e) => {
     e.preventDefault(); depth = 0; $('#dropHint').hidden = true;
-    if (dialogOpen()) { toast('Finish or close the open dialog first (it has its own "Add more .ydd…" button).', 'warn', 4000); return; }
+    if (dialogOpen()) { toast(t('Finish or close the open dialog first (it has its own "Add more .ydd…" button).'), 'warn', 4000); return; }
     const f = e.dataTransfer.files[0];
     if (!f) return;
     const ydds = [...e.dataTransfer.files].filter((x) => /\.ydd$/i.test(x.name));
@@ -1986,7 +2527,7 @@ function wireDrop() {
         return;
       }
       const p = api.pathForFile(f);
-      if (!p) { toast('Folder drop needs the desktop app. Use ?pack= in the dev page.', 'warn'); return; }
+      if (!p) { toast(t('Folder drop needs the desktop app. Use ?pack= in the dev page.'), 'warn'); return; }
       await loadPack(await api.scanPack(p));
     } catch (err) { toast(String(err.message || err), 'error', 8000); }
   });
@@ -1995,7 +2536,7 @@ function wireDrop() {
     if (dialogOpen()) return;
     for (const it of e.clipboardData.items) {
       if (it.type.startsWith('image/')) {
-        await importFromDataUrl(URL.createObjectURL(it.getAsFile()), 'layer', 'Pasted');
+        await importFromDataUrl(URL.createObjectURL(it.getAsFile()), 'layer', t('Pasted'));
         return;
       }
     }
@@ -2003,8 +2544,140 @@ function wireDrop() {
 }
 
 // ---------------------------------------------------------------- keyboard
+// Every shortcut is in this table: its keys (spelled as keys.js spells a key press), its group and text in the list of shortcuts (F1),
+// and what it does. KEY_HINTS adds what the list also explains but that is not a single key press (Alt+click, Space+drag ...).
+const KEY_NAME = { Ctrl: N_('Ctrl'), Shift: N_('Shift'), Alt: N_('Alt'), Space: N_('Space'), Delete: N_('Del'), Escape: N_('Esc'), Enter: N_('Enter'), PageDown: N_('Page Down'), PageUp: N_('Page Up') };
+const keyName = (k) => (KEY_NAME[k] ? t(KEY_NAME[k]) : k);
+const clickBtn = (id) => () => { const b = $(id); if (b && !b.disabled) b.click(); };
+const stepRange = (id, to) => { const r = $(id); r.value = clamp(Math.round(to(+r.value)), +r.min, +r.max); r.dispatchEvent(new Event('input')); };
+const toggleBox = (id) => { const c = $(id); c.checked = !c.checked; c.dispatchEvent(new Event('change')); };
+const zoomCenter = (f) => { const vp = $('#viewport'), r = vp.getBoundingClientRect(); zoomAt(f, r.left + vp.clientWidth / 2, r.top + vp.clientHeight / 2); };
+const onDoc = (fn) => () => { if (Paint.doc && S.sel && textSettle()) fn(Paint.doc); };
+const G = { files: N_('Files'), pieces: N_('Pieces and textures'), edit: N_('Edit'), tools: N_('Tools'), paint: N_('Painting'), layers: N_('Layers'), view: N_('View'), modes: N_('Text and Resize tools'), help: N_('Help') };
+
+const SHORTCUTS = [
+  { group: G.files, keys: ['Ctrl+O'], text: N_('Open pack…'), run: () => openPackDialog() },
+  { group: G.files, keys: ['Ctrl+S'], text: N_('Save to YTD'), run: () => saveToYtd() },
+  { group: G.files, keys: ['Ctrl+Shift+S'], text: N_('Save layers…'), run: () => saveProject() },
+  { group: G.files, keys: ['Ctrl+Shift+O'], text: N_('Open layers…'), run: () => openProject() },
+  { group: G.files, keys: ['Ctrl+Shift+E'], text: N_('Export PNG'), run: () => exportPng() },
+  { group: G.files, keys: ['Ctrl+I'], text: N_('Import image…'), run: () => importImage('layer') },
+  { group: G.files, keys: ['Ctrl+B'], text: N_('Build the pack (FiveM or single player)…'), run: () => buildPackUi() },
+
+  { group: G.pieces, keys: ['PageDown'], text: N_('Next texture (then the next piece)'), run: () => stepTexture(1) },
+  { group: G.pieces, keys: ['PageUp'], text: N_('Previous texture'), run: () => stepTexture(-1) },
+  { group: G.pieces, keys: ['Ctrl+PageDown'], text: N_('Next piece'), run: () => stepPiece(1) },
+  { group: G.pieces, keys: ['Ctrl+PageUp'], text: N_('Previous piece'), run: () => stepPiece(-1) },
+  { group: G.pieces, keys: ['Ctrl+D'], text: N_('Copy this texture to other pieces…'), run: () => { if (S.sel) copyTextureUi(S.sel.item, S.sel.variant); } },
+  { group: G.pieces, keys: ['Ctrl+Shift+D'], text: N_('New texture for this piece, a copy of this one'), run: () => { if (S.sel) addVariant(S.sel.item); } },
+  { group: G.pieces, keys: ['Ctrl+P'], text: N_('Piece options'), run: () => { if (S.sel) openOptions(S.sel.item); } },
+
+  { group: G.edit, keys: ['Ctrl+Z'], text: N_('Undo'), run: () => { if (S.text) textEnd(false); else if (Paint.doc) Paint.undo(); } },
+  { group: G.edit, keys: ['Ctrl+Y', 'Ctrl+Shift+Z'], text: N_('Redo'), run: () => { if (S.text) textEnd(false); else if (Paint.doc) Paint.redo(); } },
+
+  { group: G.tools, keys: ['B'], text: N_('Brush'), run: () => setTool('brush') },
+  { group: G.tools, keys: ['E'], text: N_('Erase'), run: () => setTool('eraser') },
+  { group: G.tools, keys: ['G'], text: N_('Fill'), run: () => setTool('fill') },
+  { group: G.tools, keys: ['I'], text: N_('Pick'), run: () => setTool('eyedrop') },
+  { group: G.tools, keys: ['L'], text: N_('Line'), run: () => setTool('line') },
+  { group: G.tools, keys: ['R'], text: N_('Rect'), run: () => setTool('rect') },
+  { group: G.tools, keys: ['O'], text: N_('Oval'), run: () => setTool('ellipse') },
+  { group: G.tools, keys: ['T'], text: N_('Text'), run: () => setTool('text') },
+  { group: G.tools, keys: ['V'], text: N_('Move'), run: () => setTool('move') },
+  { group: G.tools, keys: ['S', 'Ctrl+T'], text: N_('Resize'), run: () => setTool('transform') },
+
+  { group: G.paint, keys: ['[', ']'], show: [['['], [']']], text: N_('Smaller / bigger brush'), run: (e, k) => stepRange('#oSize', (v) => (k === ']' ? v + Math.max(1, v * 0.15) : v - Math.max(1, v * 0.15))) },
+  { group: G.paint, keys: ['Shift+[', 'Shift+]'], show: [['Shift', '['], ['Shift', ']']], text: N_('Softer / harder brush'), run: (e, k) => stepRange('#oHard', (v) => v + (k === 'Shift+]' ? 10 : -10)) },
+  { group: G.paint, keys: [], match: (e) => digitOf(e) !== null && !e.shiftKey, show: [['1'], ['9']], showSep: '…', text: N_('Opacity 10 % … 90 %, 0 = 100 %'), run: (e) => stepRange('#oOpac', () => digitOf(e) * 10) },
+  { group: G.paint, keys: ['X'], text: N_('Swap with the previous colour'), run: () => setColor(prevColor) },
+  { group: G.paint, keys: ['D'], text: N_('Black, with white as the previous colour'), run: () => { setColor('#000000', false); prevColor = '#ffffff'; syncColorUi(); } },
+  { group: G.paint, keys: ['M'], text: N_('Mirror painting on / off'), run: () => toggleBox('#oSym') },
+
+  { group: G.layers, keys: ['Ctrl+Shift+N'], text: N_('New layer'), run: clickBtn('#lAdd') },
+  { group: G.layers, keys: ['Ctrl+J'], text: N_('Duplicate the layer'), run: clickBtn('#lDup') },
+  { group: G.layers, keys: ['Ctrl+E'], text: N_('Merge down'), run: clickBtn('#lMerge') },
+  { group: G.layers, keys: ['Ctrl+]', 'Ctrl+['], show: [['Ctrl', ']'], ['Ctrl', '[']], text: N_('Move the layer up / down'), run: (e, k) => clickBtn(k === 'Ctrl+]' ? '#lUp' : '#lDown')() },
+  { group: G.layers, keys: ['Alt+]', 'Alt+['], show: [['Alt', ']'], ['Alt', '[']], text: N_('Select the layer above / below'), run: (e, k) => onDoc((d) => Paint.layerOp.select(clamp(d.active + (k === 'Alt+]' ? 1 : -1), 0, d.layers.length - 1)))() },
+  { group: G.layers, keys: ['Ctrl+,'], text: N_('Show / hide the layer'), run: onDoc((d) => Paint.layerOp.set(d.active, 'visible', !d.layers[d.active].visible)) },
+  { group: G.layers, keys: ['Ctrl+/'], text: N_('Lock / unlock the layer'), run: clickBtn('#lLock') },
+  { group: G.layers, keys: ['Ctrl+G'], text: N_('Clip the layer to the one below / unclip it'), run: clickBtn('#lClip') },
+  { group: G.layers, keys: ['Ctrl+Shift+F'], text: N_('Fabric look… (folds, fabric grain, bend)'), run: clickBtn('#lFabric') },
+  { group: G.layers, keys: ['F2'], text: N_('Rename layer'), run: clickBtn('#lRename') },
+  { group: G.layers, keys: ['Delete'], text: N_('Delete the layer (Undo brings it back)'), run: clickBtn('#lDel') },
+
+  { group: G.view, keys: ['F', 'Ctrl+0'], text: N_('Fit the texture in the view'), run: () => fit() },
+  { group: G.view, keys: ['Ctrl+1'], text: N_('100% zoom'), run: clickBtn('#z100') },
+  { group: G.view, keys: ['Ctrl+=', 'Ctrl+Shift+=', 'Ctrl++'], show: [['Ctrl', '+'], ['Ctrl', '-']], text: N_('Zoom in / out'), run: () => zoomCenter(1.25) },
+  { group: G.view, keys: ['Ctrl+-'], hidden: true, run: () => zoomCenter(0.8) },
+  { group: G.view, keys: ['U'], text: N_('UV guide on / off'), run: () => toggleBox('#oGuide') },
+
+  { group: G.help, keys: ['F1'], match: (e) => e.key === '?' && !e.ctrlKey && !e.altKey && !e.metaKey, show: [['F1'], ['?']], text: N_('This list of keyboard shortcuts'), run: () => showShortcuts() },
+];
+
+const KEY_HINTS = [
+  { group: G.tools, show: [['Alt', { m: N_('click') }]], text: N_('Pick a colour from the texture, with any tool') },
+  { group: G.paint, show: [['Shift', { m: N_('drag') }]], text: N_('Line, rectangle, oval: straight angles, a square, a circle') },
+  { group: G.view, show: [['Space', { m: N_('drag') }]], text: N_('Move the view') },
+  { group: G.view, show: [[{ m: N_('mouse wheel') }]], text: N_('Zoom (with the Move tool: scale the layer)') },
+  { group: G.view, show: [['F11']], text: N_('3D view full screen (Esc leaves it)') },
+  { group: G.modes, show: [['Ctrl', 'Enter'], ['Escape']], text: N_('Text tool: place the text / cancel it') },
+  { group: G.modes, show: [['Enter'], ['Escape']], text: N_('Resize tool: apply / cancel') },
+  { group: G.modes, show: [[{ m: N_('arrow keys') }], ['Shift', { m: N_('arrow keys') }]], text: N_('Resize tool: move the layer 1 / 10 pixels') },
+];
+
+/** The pieces in the order of the Pack list (male first) that the filter box shows and that have a texture. */
+function listedPieces() {
+  if (!S.pack) return [];
+  const q = (S.filter || '').trim().toLowerCase();
+  return ['male', 'female'].flatMap((g) => S.pack.items.filter((i) => i.gender === g && i.variants.length && (!q || `${g} ${i.group} ${i.label} ${i.comp}`.toLowerCase().includes(q))));
+}
+/** PageDown / PageUp: the next / previous texture, on into the next / previous piece. */
+function stepTexture(dir) {
+  const flat = listedPieces().flatMap((it) => it.variants.map((v) => ({ it, v })));
+  if (!flat.length) return;
+  const i = S.sel ? flat.findIndex((x) => x.it === S.sel.item && x.v === S.sel.variant) : -1;
+  const n = flat[i < 0 ? 0 : clamp(i + dir, 0, flat.length - 1)];
+  if (!(S.sel && n.v === S.sel.variant)) selectVariant(n.it, n.v);
+}
+/** Ctrl+PageDown / Ctrl+PageUp: the first texture of the next / previous piece. */
+function stepPiece(dir) {
+  const list = listedPieces();
+  if (!list.length) return;
+  const i = S.sel ? list.indexOf(S.sel.item) : -1;
+  const it = list[i < 0 ? 0 : clamp(i + dir, 0, list.length - 1)];
+  if (!(S.sel && it === S.sel.item)) selectVariant(it, it.variants[0]);
+}
+
+/** F1: every shortcut, grouped. */
+function showShortcuts() {
+  const groups = Object.values(G).map((name) => ({ name, rows: [] }));          // in the order of G, Help last
+  for (const s of [...SHORTCUTS.filter((x) => !x.hidden), ...KEY_HINTS]) groups.find((x) => x.name === s.group).rows.push(s);
+  for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].rows.length) groups.splice(i, 1);
+  const grid = el('div', 'keysgrid');
+  for (const g of groups) {
+    const sec = el('section', 'keysgroup');
+    sec.append(el('h5', '', t(g.name)));
+    const tbl = el('table', 'keystable');
+    for (const s of g.rows) {
+      const keys = el('td', 'k');
+      (s.show || s.keys.map((k) => k.split('+'))).forEach((parts, i) => {
+        if (i) keys.append(document.createTextNode(s.showSep ? ` ${s.showSep} ` : ' / '));
+        parts.forEach((p, j) => {
+          if (j) keys.append(document.createTextNode('+'));
+          keys.append(typeof p === 'object' ? el('span', 'kmouse', t(p.m)) : el('kbd', '', keyName(p)));
+        });
+      });
+      const tr = el('tr');
+      tr.append(keys, el('td', '', t(s.text)));
+      tbl.append(tr);
+    }
+    sec.append(tbl);
+    grid.append(sec);
+  }
+  return modal({ title: t('Keyboard shortcuts'), wide: true, content: grid, buttons: [{ id: 'cancel', label: t('Close') }] });
+}
+
 function wireKeys() {
-  const toolKeys = { b: 'brush', e: 'eraser', g: 'fill', i: 'eyedrop', l: 'line', r: 'rect', o: 'ellipse', t: 'text', v: 'move', s: 'transform' };
   window.addEventListener('keydown', (e) => {
     if (dialogOpen()) return;
     if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); return; }
@@ -2014,19 +2687,7 @@ function wireKeys() {
     const typing = tag === 'TEXTAREA' || (tag === 'INPUT' && /^(text|number|search|email|url|tel|password)$/i.test(ae.type)) || !!(ae && ae.isContentEditable);
     if (e.key === ' ' && !typing) { S.space = true; $('#viewport').style.cursor = 'grab'; e.preventDefault(); return; }
     if (typing) return;
-    const k = e.key.toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y') && S.text) { e.preventDefault(); textEnd(false); return; }     // first undo = drop the open text
-    if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? Paint.doc && Paint.redo() : Paint.doc && Paint.undo(); return; }
-    if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); Paint.doc && Paint.redo(); return; }
-    if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); saveToYtd(); return; }
-    if ((e.ctrlKey || e.metaKey) && k === 't') { e.preventDefault(); setTool('transform'); return; }
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && S.layerKeys && S.layerKeys[k]) {          // Ctrl+J duplicate · Ctrl+E merge down · Ctrl+] / Ctrl+[ layer up / down
-      e.preventDefault();
-      if (Paint.doc && S.sel && textSettle()) S.layerKeys[k]();
-      return;
-    }
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (Paint.opts.tool === 'transform' && Paint.doc && Paint.xformState()) {
+    if (!(e.ctrlKey || e.metaKey || e.altKey) && Paint.opts.tool === 'transform' && Paint.doc && Paint.xformState()) {
       if (e.key === 'Enter') { e.preventDefault(); applyTransform(); return; }
       if (e.key === 'Escape') { e.preventDefault(); cancelTransform(); return; }
       const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -2037,27 +2698,83 @@ function wireKeys() {
         return;
       }
     }
-    if (toolKeys[k]) { setTool(toolKeys[k]); return; }
-    if (k === 'f') fit();
-    else if (k === 'x') setColor(prevColor);
-    else if (e.key === '[') { const r = $('#oSize'); r.value = Math.max(1, +r.value - Math.max(1, Math.round(+r.value * 0.15))); r.dispatchEvent(new Event('input')); }
-    else if (e.key === ']') { const r = $('#oSize'); r.value = Math.min(400, +r.value + Math.max(1, Math.round(+r.value * 0.15))); r.dispatchEvent(new Event('input')); }
+    const combo = comboOf(e);
+    const s = SHORTCUTS.find((x) => shortcutMatches(x, e, combo));
+    if (!s) return;
+    e.preventDefault();
+    s.run(e, combo);
   });
   window.addEventListener('keyup', (e) => {
     if (e.key === ' ') { S.space = false; setTool(Paint.opts.tool); }
   });
 }
 
+// ---------------------------------------------------------------- language
+/** The texts the program changed itself (not the static ones: showLanguage translated those) are written again in the new language. */
+function refreshLanguage() {
+  const code = getLanguage(), l = LANGUAGES.find((x) => x.code.toLowerCase() === code.toLowerCase());
+  $('#btnLang').textContent = '🌐 ' + (l ? l.short : code.toUpperCase());
+  for (const o of $('#lBlend').options) { const b = Paint.BLENDS.find((x) => x && x[0] === o.value); if (b) o.textContent = t(b[1]); }
+  $('#vFull').textContent = S.fs ? t('Exit') : t('Full');
+  updateBodyButton(); updatePopButton(); updateViewInfo();
+  if (S.pack) localizePack(S.pack);
+  updatePackName(); refreshYmt();
+  if (S.sel) { $('#current').textContent = currentLabel(); showTexSize(S.sel); }
+  if (S.emptyMsg && !$('#empty').hidden) $('#empty').textContent = t(S.emptyMsg);
+  renderTree(); renderLayers(); syncXformUi();
+}
+
+/** Switch the whole editor to a language: its code, or '' for "automatic" (the language of the system). */
+async function switchLanguage(choice) {
+  let info = { system: [] };
+  try { info = (await api.getLanguage()) || info; } catch { /* ignore */ }
+  const code = choice || pickLanguage(null, info.system);
+  try { await api.setLanguage(choice, true); if (!choice) await api.setLanguage(code, false); } catch { /* the dialogs of the main process stay as they were */ }
+  await showLanguage(code);
+  refreshLanguage();
+  if (S.pop) { api.viewerSend({ type: 'lang', code }); api.viewerSend({ type: 'label', label: $('#current').textContent }); }
+  return code;
+}
+
+async function chooseLanguage() {
+  let saved = '';
+  try { saved = ((await api.getLanguage()) || {}).saved || ''; } catch { /* ignore */ }
+  const pick = await modal({
+    title: t('Language'),
+    wide: true,
+    lines: [t('Choose the language of ClothingStudio. The translations were made with machine translation and may contain mistakes.')],
+    content: (finish) => {
+      const grid = el('div', 'langgrid');
+      const item = (code, name, sub) => {
+        const b = el('button', 'lang' + (code === saved ? ' sel' : ''));
+        if (code) b.setAttribute('lang', code);
+        b.append(el('span', 'ln', name));
+        if (sub) b.append(el('span', 'le', sub));
+        b.onclick = () => finish(code || '__auto');
+        grid.append(b);
+      };
+      item('', t('Automatic'), t('the language of this PC'));
+      for (const l of LANGUAGES) item(l.code, l.name, l.name === l.english ? '' : l.english);
+      return grid;
+    },
+    buttons: [{ id: 'cancel', label: t('Cancel') }],
+  });
+  if (pick) await switchLanguage(pick === '__auto' ? '' : pick);
+}
+
 // ---------------------------------------------------------------- boot
 async function boot() {
+  await startLanguage(api);                         // first, so nothing is drawn in English that should not be
   Paint.attach($('#view'), $('#overlay'));
   Paint.on('layers', () => { renderLayers(); ensureTransform(); syncXformUi(); syncTextUi(); });
   Paint.on('xform', syncXformUi);
+  Paint.on('resize', onDocResized);              // the resolution changed: a resize, or Undo / Redo of one
   Paint.on('change', onChange);
   Paint.on('pick', (c) => setColor(c));
   Paint.on('doc', () => textEnd(false));         // safety net: a different document never inherits an open text box
-  Paint.on('warn', (m) => toast(m, 'warn'));
-  Paint.on('note', (m) => toast(m, 'info', 9000));       // things the paint engine did for you that you should know about
+  Paint.translate = t;                           // the engine writes its messages in English; this is how they get translated
+  Paint.on('warn', (m) => toast(tm(m), 'warn'));
+  Paint.on('note', (m) => toast(tm(m), 'info', 9000));   // things the paint engine did for you that you should know about
 
   viewer = new Viewer($('#viewer3d'));
   try {
@@ -2086,6 +2803,8 @@ async function boot() {
   $('#pNew').onclick = newPackUi;
   $('#pBuild').onclick = buildPackUi;
   $('#btnSave').onclick = saveToYtd;
+  $('#btnLang').onclick = chooseLanguage;
+  $('#btnKeys').onclick = () => showShortcuts();
   $('#btnExport').onclick = exportPng;
   $('#btnProjSave').onclick = saveProject;
   $('#btnProjOpen').onclick = openProject;
@@ -2095,14 +2814,15 @@ async function boot() {
   wireViewport(); wireOptions(); wireColor(); wireLayerPanel(); wireTransformBar(); wireDrop(); wireKeys();
   setTool('brush');
   renderTree();
+  refreshLanguage();
 
   window.csDirty = () => [...S.docs.values()].some((e) => e.doc.dirty);
-  window.__cs = { S, Paint, viewer, selectVariant, loadPack, setColor, setTool, ensureTransform, movePieceUi, deletePieceUi, afterPieceOp, openPieceMenu, showYmt, refreshYmt, openOptions, TXT, textBegin, textEnd, textRefresh, syncTextUi, textEditLayer, textHit };
+  window.__cs = { S, Paint, viewer, selectVariant, loadPack, setColor, setTool, ensureTransform, movePieceUi, deletePieceUi, afterPieceOp, openPieceMenu, showYmt, refreshYmt, openOptions, switchLanguage, chooseLanguage, copyTextureUi, showShortcuts, TXT, textBegin, textEnd, textRefresh, syncTextUi, textEditLayer, textHit };
 
   if (!api.isDesktop) {
     const p = await api.openPack().catch(() => null);
     if (p) loadPack(p);
-    else setMsg('Dev mode: add ?pack=<folder> to the URL to load a resource.');
+    else setMsg(t('Dev mode: add ?pack=<folder> to the URL to load a resource.'));
   }
 }
 
@@ -2112,8 +2832,8 @@ async function boot() {
  */
 function withOp(fn) {
   return async function guarded(...args) {
-    if (S.opBusy) { toast('Wait for the current operation to finish first.', 'warn', 2500); return undefined; }
-    if (S.busy) { toast('A piece is still loading - try again in a second.', 'warn', 2500); return undefined; }
+    if (S.opBusy) { toast(t('Wait for the current operation to finish first.'), 'warn', 2500); return undefined; }
+    if (S.busy) { toast(t('A piece is still loading - try again in a second.'), 'warn', 2500); return undefined; }
     S.opBusy = true;
     try { return await fn.apply(this, args); } finally { S.opBusy = false; }
   };
@@ -2125,6 +2845,7 @@ openOptions = withOp(openOptions);
 addPiecesFlow = withOp(addPiecesFlow);
 addVariant = withOp(addVariant);
 deleteVariant = withOp(deleteVariant);
+copyTextureUi = withOp(copyTextureUi);
 buildPackUi = withOp(buildPackUi);
 
-boot().catch((e) => { console.error(e); toast('Startup error: ' + e.message, 'error', 20000); });
+boot().catch((e) => { console.error(e); toast(t('Startup error: {error}', { error: e.message }), 'error', 20000); });

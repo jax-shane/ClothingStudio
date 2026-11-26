@@ -330,7 +330,11 @@ function findTemplate(pack, gender, prop, comp, item) {
   throw new Error('No texture template available.');
 }
 
-/** Write one texture file: copy an existing .ytd, or paint pixels into a copy of the template. */
+/**
+ * Write one texture file: copy an existing .ytd, or paint pixels into a copy of the template. A png is normally exactly the
+ * template's size; with `resize: true` it is written at its own width x height instead (the user chose a bigger or smaller
+ * texture than the rest of the pack has), which ytd.resizeTexture checks (powers of two, 4 - 4096).
+ */
 function writeTexture(dest, tex, template, J) {
   if (fs.existsSync(dest)) throw new Error(base(dest) + ' already exists.');
   if (tex.kind === 'ytd') {
@@ -339,10 +343,11 @@ function writeTexture(dest, tex, template, J) {
     J.created(dest);
     return;
   }
-  const { width, height } = template;
+  let { width, height } = template;
   let rgba;
   if (tex.kind === 'png') {
     rgba = Buffer.from(tex.rgba.buffer, tex.rgba.byteOffset, tex.rgba.byteLength);
+    if (tex.resize) { width = Number(tex.width); height = Number(tex.height); }
     if (rgba.length !== width * height * 4) throw new Error(`The image must be ${width}×${height} pixels for this piece (it was ${tex.width}×${tex.height}).`);
   } else {                                                                        // blank: neutral grey
     rgba = Buffer.alloc(width * height * 4, 0x80);
@@ -350,10 +355,11 @@ function writeTexture(dest, tex, template, J) {
   }
   fs.writeFileSync(dest, fs.readFileSync(template.file));
   J.created(dest);
-  ytd.patchTexture(dest, 0, rgba, { backup: false });
+  if (width === template.width && height === template.height) ytd.patchTexture(dest, 0, rgba, { backup: false });
+  else ytd.resizeTexture(dest, 0, width, height, rgba, { backup: false });
 }
 
-/** Add textures (next letters) to an existing piece. textures: [{kind:'ytd',path}|{kind:'png',rgba,width,height}|{kind:'blank'}] */
+/** Add textures (next letters) to an existing piece. textures: [{kind:'ytd',path}|{kind:'png',rgba,width,height,resize?}|{kind:'blank'}] */
 function addTextures(root, itemId, textures) {
   const pack = scanPack(root);
   const item = pack.items.find((i) => i.id === itemId);

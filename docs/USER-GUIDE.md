@@ -6,7 +6,7 @@ Everything ClothingStudio can do, in the order you meet it. New here? Do the **[
 [Colour](#colour) · [Layers](#layers) · [The Text tool](#the-text-tool) · [The Resize tool](#the-resize-tool) ·
 [The 3D view](#the-3d-view) · [Texture variants](#texture-variants-a-b-c-) · [Pieces](#pieces-add-move-delete) ·
 [Piece options](#piece-options) · [The .ymt](#the-pack-ymt) · [New pack and Build](#new-pack-and-build) ·
-[Saving and exporting](#saving-and-exporting) · [Files the app creates](#files-the-app-creates)
+[Texture size](#texture-size) · [Saving and exporting](#saving-and-exporting) · [Language](#language) · [Files the app creates](#files-the-app-creates)
 
 ---
 
@@ -16,7 +16,7 @@ Everything ClothingStudio can do, in the order you meet it. New here? Do the **[
 
 | Area | What it is |
 |---|---|
-| **Top bar** | Open pack, the **.ymt** status chip, the piece you are editing and its **⚙ Options**, Undo / Redo, **Open layers… / Save layers…**, **Export PNG**, **Save to YTD** |
+| **Top bar** | Open pack, the **.ymt** status chip, the piece you are editing and its **⚙ Options**, Undo / Redo, **Open layers… / Save layers…**, **Export PNG**, **Save to YTD**, the **⌨** [keyboard shortcuts](#tools-and-keys) list and the **🌐** [language](#language) button |
 | **Pack** (left, top) | Every piece in the pack. **Add piece…**, **New**, **Build**, a filter box, Male / Female sections |
 | **Layers** (left, bottom) | The layers of the texture you are editing, with their buttons, opacity and blend mode |
 | **Options bar** (above the canvas) | Settings of the selected tool. It only shows what applies to that tool |
@@ -48,20 +48,49 @@ put back.
 | `S` or `Ctrl+T` | **Resize** | See [The Resize tool](#the-resize-tool) |
 | `F` | Fit | Fit the whole texture in the window. **1:1** shows real pixels |
 
-More keys:
+More keys. Press **`F1`** (or **?**, or the **⌨** button at the top right) to see all of them in the program:
 
 | Keys | Does |
 |---|---|
-| `Ctrl+Z`, `Ctrl+Y` (or `Ctrl+Shift+Z`) | Undo, redo (many steps, also for layer operations) |
+| `Ctrl+O` | Open pack… |
 | `Ctrl+S` | Save to YTD |
-| `X` | Swap the current and the previous colour |
+| `Ctrl+Shift+S`, `Ctrl+Shift+O` | Save layers…, Open layers… |
+| `Ctrl+Shift+E` | Export PNG |
+| `Ctrl+I` | Import image… (as a new layer) |
+| `Ctrl+B` | Build the pack (FiveM or single player) |
+| `Page Down`, `Page Up` | Next / previous texture; at the last texture of a piece it goes on to the next piece (in the order of the Pack list, and only the pieces the filter box shows) |
+| `Ctrl+Page Down`, `Ctrl+Page Up` | Next / previous piece |
+| `Ctrl+D` | Copy this texture to other pieces… (see [Texture variants](#texture-variants-a-b-c-)) |
+| `Ctrl+Shift+D` | New texture for this piece, a copy of this one (like **+**) |
+| `Ctrl+P` | Piece options |
+| `Ctrl+Z`, `Ctrl+Y` (or `Ctrl+Shift+Z`) | Undo, redo (many steps, also for layer operations) |
 | `[` and `]` | Smaller / bigger brush |
-| Space + drag, or middle mouse drag | Pan |
-| Mouse wheel | Zoom (with the Move tool the wheel scales the layer; hold `Ctrl` to zoom instead) |
+| `Shift+[` and `Shift+]` | Softer / harder brush |
+| `1` … `9`, `0` | Opacity 10 % … 90 %, `0` = 100 % (the number keys of any keyboard layout, also the number pad) |
+| `X` | Swap the current and the previous colour |
+| `D` | Black, with white as the previous colour |
+| `M` | Mirror painting on / off |
+| `Ctrl+Shift+N` | New layer |
 | `Ctrl+J` | Duplicate the selected layer |
 | `Ctrl+E` | Merge the selected layer down |
 | `Ctrl+]`, `Ctrl+[` | Move the selected layer up / down |
+| `Alt+]`, `Alt+[` | Select the layer above / below |
+| `Ctrl+,` | Show / hide the selected layer |
+| `Ctrl+/` | Lock / unlock the selected layer |
+| `Ctrl+G` | Clip the selected layer to the layer below / unclip it (see [Layers](#layers)) |
+| `Ctrl+Shift+F` | Fabric look… (see [Fabric look](#fabric-look-make-a-print-look-printed)) |
+| `F2` | Rename the selected layer |
+| `Del` | Delete the selected layer (Undo brings it back; with only one layer it is cleared) |
+| `F` or `Ctrl+0` | Fit the texture in the view |
+| `Ctrl+1` | 100 % zoom |
+| `Ctrl` + `+` / `Ctrl` + `-` | Zoom in / out |
+| `U` | UV guide on / off |
+| Space + drag, or middle mouse drag | Pan |
+| Mouse wheel | Zoom (with the Move tool the wheel scales the layer; hold `Ctrl` to zoom instead) |
 | `F11` | 3D view full screen (`Esc` leaves) |
+
+Shortcuts do nothing while you type in a box (a number field, the filter, the text of the Text tool) or while a dialog is open.
+`Ctrl+R` does not reload the window any more (Electron's hidden default menu did that, and unsaved painting was lost).
 
 **Mirror** (next to the brush options) paints a mirror image on the other side of the texture; it is shown for the tools
 it works with (brush, eraser, line, rect, oval). Paste an image with `Ctrl+V` or drop an image file on the window and it
@@ -97,14 +126,46 @@ The list shows the **front-most layer first**. Click a layer to select it.
 | **Delete** | Removes the layer. With only one layer it says **Clear** and wipes the layer instead. Undo brings it back |
 
 **On each row:** the **eye** shows / hides the layer, the **padlock** locks it, the thumbnail shows its contents, a blue **T** marks
-live text (double-click it to edit).
+live text (double-click it to edit), a blue **↳** marks a clipped layer (click it to unclip).
 
-**Below the list:** **Opacity** and **Blend** (Normal, Multiply, Screen, Overlay, Soft light, Darken, Lighten) of the selected layer; **Import image…**
-adds a picture as a new layer and drops you straight into the Resize tool; **As guide…** shows a picture as a see-through
-tracing guide (never saved into the texture).
+**Below the list:**
 
-**Save to YTD** flattens all visible layers. **Save layers…** keeps them (and live text) in a `.csproj` file you can open
-again with **Open layers…**.
+- **Opacity** and **Blend** of the selected layer. The blend modes are Photoshop's, in its groups: **Normal**; **Darken**,
+  **Multiply**, **Colour burn**; **Lighten**, **Screen**, **Colour dodge**, **Linear dodge (add)**; **Overlay**, **Soft light**,
+  **Hard light**; **Difference**, **Exclusion**; **Hue**, **Saturation**, **Colour**, **Luminosity**. **Multiply** is the classic one
+  for prints: dark ink on light cloth, with the cloth's colour and folds showing through (white parts of the print disappear).
+- **Clip** (`Ctrl+G`): a **clipping mask**, like Photoshop's "clip to the layer below". The layer then only shows where the nearest
+  unclipped layer below it has pixels, so a shading or texture layer clipped to your logo stays on the logo. Several layers can be
+  clipped to the same one; hiding that layer hides them too.
+- **Import image…** adds a picture as a new layer and drops you straight into the Resize tool (a picture bigger than the texture first
+  asks whether to keep the texture's size or make the texture bigger: see [Texture size](#texture-size)); **As guide…** shows a picture
+  as a see-through tracing guide (never saved into the texture).
+- **Fabric look…**: see below.
+
+**Save to YTD** flattens all visible layers. **Save layers…** keeps them (with their blend modes, clipping and live text) in a
+`.csproj` file you can open again with **Open layers…**.
+
+## Fabric look: make a print look printed
+
+A logo or graphic pasted on a shirt looks flat because the folds, creases and weave of the cloth stop at its edge. **Fabric look…**
+(`Ctrl+Shift+F`, the blue button under the layers) puts them back on top of it. Select the layer with your print first, then:
+
+| Setting | Does |
+|---|---|
+| **Folds and creases** | The shading of the cloth, taken from the bottom layer (the texture as it came from the `.ytd`): its folds, creases and seams without its colours. **Strength** is how much shows; **Fold size** keeps only fine wrinkles (small) or wide folds as well (big) |
+| **Fabric grain** | A fabric surface: **Cotton**, **Jersey knit** (T-shirt), **Denim**, **Canvas**, **Sports mesh**, **Fleece**, **Leather** or **Fine grain**. **Grain size** is the distance between threads or stitches; each fabric starts at a size that suits it |
+| **Blend** | How the two are laid on: **Hard light** shades every colour, white ink too (the default); **Overlay** is strongest on mid tones and leaves white and black ink almost alone; **Soft light** is gentle |
+| **Bend the print with the folds** | Moves the pixels of the print along the creases, like Photoshop's **Displace** filter, so its straight lines follow the cloth. It changes the print layer itself (a live text layer becomes pixels), so do it last, when the print is in place |
+| **Ink** | The print layer's own blend mode: **Multiply** lets the cloth show through the ink, **Normal** is solid ink |
+| **Apply to** | **Only on** the print (the new layers are clipped to it, the default), or **on the whole texture** |
+
+Everything shows live on the texture and in the 3D view while the dialog is open. **Add** puts it in as ordinary layers, *Fabric
+grain: …* and *Fabric folds*, both clipped to your print and set to the blend you chose, so you can still change their **Opacity** and
+**Blend**, hide them or delete them. Moving the print later is fine: the folds and the grain stay where the cloth is. One `Ctrl+Z`
+takes all of it back.
+
+Tips: a print on a dark shirt is usually white or light ink, which **Hard light** shades well. Dark ink on a light shirt looks
+printed with **Ink: Multiply** alone. Lower **Strength** for flat, new-looking clothes; raise it for worn ones.
 
 ## The Text tool
 
@@ -211,6 +272,11 @@ A piece can have up to 26 textures; in game they are the colour / style choices 
   one from the painting instead of the saved file). Nothing existing is changed.
 - **×** (or right-click a letter) deletes that texture. It goes to the Recycle Bin and the later ones **move down a letter** (delete
   `c` of `a b c d`: the old `d` becomes `c`; unsaved painting follows it). A piece always keeps at least one texture.
+- **Copy a texture to other pieces** (in the **⋯** menu of a piece, or `Ctrl+D` for the texture you are editing): choose the texture,
+  tick the pieces that should get it (a filter box and **Tick the same kind** help with big packs) and press **Copy**. Each ticked piece
+  gets the copy as its **next** letter; nothing existing is changed. The copy is the `.ytd` as it is saved (same size, format and mips);
+  if you have unsaved painting on that texture you can copy your painting instead. A texture is painted for the UV layout of its
+  model, so it fits other models of the same kind best; on a model with a different layout it lands in different places.
 - The `.ymt` is updated right after, so the game sees the new count.
 
 ## Pieces: add, move, delete
@@ -224,7 +290,7 @@ piece). **Click a piece's name** to open it. Every piece has a **⋯** button (o
 |---|---|
 | **Options…** | [Piece options](#piece-options) |
 | **Move up / Move down** | Swaps it with the neighbouring piece. Model and every texture are renamed together, so the right `.ydd` always stays with its `.ytd` files; unsaved painting follows the piece; the `.ymt` entries (audio, flags …) move with it |
-| **Add textures…** | PNG / JPG / WEBP files or ready-made `.ytd` files, each becoming the next letter. Images are scaled to the size and format of the piece's other textures (DXT1 keeps only on / off transparency) |
+| **Add textures…** | PNG / JPG / WEBP files or ready-made `.ytd` files, each becoming the next letter. Images are scaled to the size and format of the piece's other textures (DXT1 keeps only on / off transparency); an image bigger than that asks first whether the new texture should be bigger too ([Texture size](#texture-size)) |
 | **Delete piece…** | Model and textures go to the Recycle Bin; later pieces renumber (delete `Top 001` and `Top 002` becomes `Top 001`) so there is no gap |
 
 **Add piece…** (or drop `.ydd` files on the window):
@@ -282,22 +348,73 @@ each piece has, plus audio and flags. The chip in the top bar shows whether they
 
 - **New** makes an empty resource (`fxmanifest.lua`, both `.meta` files, empty `.ymt`s, `stream/`) in a folder you choose, then asks
   which `.ydd` models to put in it.
-- **Build** writes a clean FiveM resource of the open pack into a folder you choose, optionally under a new name: stream files renamed
-  to the new name, `.ymt` rebuilt from yours (audio, flags and heels kept, every piece listed, texture counts matching), `.meta` files
-  and `fxmanifest.lua`. Copy the folder into your server's `resources` and `ensure` it.
+- **Build** asks what to build the pack **for**, then for a name and a folder (it remembers your last choice):
+  - **FiveM resource** writes a clean resource of the open pack into the folder, optionally under a new name: stream files renamed
+    to the new name, `.ymt` rebuilt from yours (audio, flags and heels kept, every piece listed, texture counts matching), `.meta` files
+    and `fxmanifest.lua`. Copy the folder into your server's `resources` and `ensure` it.
+  - **Single player (dlc.rpf)** writes a **single-player DLC pack** for story mode: a folder named after the pack (in lower case) with
+    `dlc.rpf` and `INSTALL.txt` in it. To use it, copy that folder into `<your GTA V folder>\mods\update\x64\dlcpacks\` (OpenIV's *mods*
+    folder) and add the line `<Item>dlcpacks:/<name>/</Item>` to `dlclist.xml`; the dialog shows the exact line and `INSTALL.txt` explains
+    every step. The clothes belong to the freemode characters (`mp_m_freemode_01` and `mp_f_freemode_01`), so you need a trainer or menu mod
+    that can switch the player to a freemode character and change its clothes. What goes into `dlc.rpf` is described in
+    [Pack format](PACK-FORMAT.md#single-player-dlcrpf).
 
-Not done yet: splitting packs of more than 128 pieces, and the *replace* / *singleplayer* / AltV layouts.
+  The single-player pack was written from the layout of the game's own clothing DLCs and read back to check it, but it has **not been
+  tried in game**: keep a backup of your game files and of `dlclist.xml`.
+
+Not done yet: splitting packs of more than 128 pieces, and the *replace* / AltV layouts.
+
+## Texture size
+
+A texture's size is stored in its `.ytd`, so the canvas you paint on is exactly that size (the textures of a new pack are 1024×1024).
+When you bring in an image that is **bigger than the texture in both directions**, the app asks what to do. This happens with
+**Import image…** (and a dropped or pasted image), with **Open layers…** on a project that was saved bigger, and with **Add textures…**
+and **Add piece…**. The choices:
+
+- **Keep 1024×1024** (the default, so pressing Enter changes nothing): the image is scaled down to fit, as it always was.
+- **Resize to 2048×2048 / 4096×4096** (in the Add dialogs: **Make it …** or **Up to …**): the texture itself gets that size.
+  In the editor everything already painted is scaled up with it (live text is painted again, so it stays sharp and editable), the new
+  image goes in at its own pixels, and **Undo** brings the old size back. The status bar says *resized from 1024×1024, not saved yet*;
+  the `.ytd` changes when you press **Save to YTD**, whose box shows the old and the new size. The original stays as `.ytd.bak`.
+  When adding textures or pieces, the new `.ytd` is made at that size straight away.
+
+Good to know:
+
+- The sizes offered are the texture's own size doubled, up to **4096×4096**. A bigger texture keeps more detail but takes much more memory,
+  in game and in this editor: about 0.7 MB for 1024×1024, 2.7 MB for 2048×2048 and 11 MB for 4096×4096 (DXT1; DXT5 and BC7 twice that). The
+  dialog tells you. Every texture of a piece may have its own size; the `.ymt` only counts textures, it does not store their size.
+- A wide banner, or a logo that is merely large, is just fitted without asking. Tick **Always keep the texture size** in the question to
+  stop it asking until the app is restarted.
+- Like everything else here, this is verified by writing the file and reading it back, **not by loading it in GTA V**: look at a big
+  texture in game before you rely on it, and keep the `.bak`.
 
 ## Saving and exporting
 
 | Button | Does |
 |---|---|
-| **Save to YTD** (`Ctrl+S`) | Flattens the visible layers and writes them into the `.ytd` of the texture you are editing, at its original size and format (DXT1 / DXT5 / A8R8G8B8; mips regenerated). The original is kept once as `.ytd.bak` |
+| **Save to YTD** (`Ctrl+S`) | Flattens the visible layers and writes them into the `.ytd` of the texture you are editing, at its original size (or the bigger size you chose, see [Texture size](#texture-size)) and format (DXT1 / DXT5 / BC7 / A8R8G8B8; mips regenerated). The original is kept once as `.ytd.bak` |
 | **Export PNG** | Saves the flattened texture as a PNG |
-| **Save layers… / Open layers…** | Keeps / restores all layers (and live text) in a `.csproj` file |
+| **Save layers… / Open layers…** | Keeps / restores all layers (and live text) in a `.csproj` file. Open them with the pack open and a piece selected: the layers load *into* that piece's texture |
 
 Unsaved painting follows its piece when you switch pieces or move them, and a texture chip with unsaved painting shows a
 dot (like the `a •` in the screenshot above). Opening another pack asks before it throws unsaved painting away.
+
+**File dialogs remember their folder.** Import image, Add textures, Add piece (`.ydd`), Open pack, New, Build, Export PNG and Save / Open
+layers open in the folder you last used them in. Images, textures and models share one folder (so a Downloads folder full of textures is
+one click away); packs, builds, exported PNGs and `.csproj` files each remember their own. A folder that no longer exists is ignored.
+
+## Language
+
+Press the **🌐** button at the top right to choose the language of the program. **Automatic** (the default) follows the language of your
+PC; the choice is remembered. The dialog lists every language, each written in its own language. The change is immediate: nothing is
+lost or reloaded, the painting stays as it is.
+
+- The translations were made with **machine translation** and have not been checked by native speakers. A text that has no translation yet
+  is shown in English. If something reads wrong, you can fix it yourself in a text file, see **[Translating](TRANSLATING.md)**.
+- What changes: all buttons, tooltips, questions, messages, the 3D pop-out window and the file dialogs of the program itself. What does not:
+  file names, the names of file types (`.ytd`, `.ymt`, DXT1 ...), flag names, and the messages of the file-format code that appear after a
+  colon in an error ("Could not add the textures: …"), which are in English.
+- Arabic and Hebrew: the words run right to left but the layout of the editor is not mirrored.
 
 ## Files the app creates
 
@@ -306,6 +423,7 @@ dot (like the `a •` in the screenshot above). Opening another pack asks before
 | `<name>.ytd.bak`, `<name>.ymt.bak` | first time that file is changed | the untouched original; never overwritten afterwards |
 | `.cs_journal.json` in the pack folder | while a piece operation runs | lets the next start undo a half-finished operation; removed when the operation succeeds |
 | `keys.bin` in `%APPDATA%\ClothingStudio` | first time you use **Body** | cached archive key from *your* `GTA5.exe`, so the one-minute scan runs once |
+| `settings.json` in `%APPDATA%\ClothingStudio` | when you set the GTA V folder, use a file dialog or choose a language | the GTA V folder, the folder each kind of file dialog was last used in, and the language you chose |
 | Recycle Bin entries | when you delete a piece or texture | **Restore** puts a file back under its real name and folder |
 | a `.csproj` file | when you press **Save layers…** | your layers |
 

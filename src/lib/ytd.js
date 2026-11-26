@@ -1,25 +1,28 @@
 'use strict';
 // GTA V .ytd (texture dictionary): read, decode to RGBA, re-encode and patch
 // the pixels back into the original file. Supports the formats addon clothing
-// uses: DXT1, DXT5 and A8R8G8B8, including mip chains.
+// uses: DXT1, DXT5, BC7 and A8R8G8B8, including mip chains.
 
 const fs = require('fs');
 const zlib = require('zlib');
 const { loadRsc, ptrAt, resolve, cstring } = require('./rsc');
+const bc7 = require('./bc7');
 
-const FMT = { DXT1: 0x31545844, DXT5: 0x35545844, A8R8G8B8: 21 };
+const FMT = { DXT1: 0x31545844, DXT5: 0x35545844, BC7: 0x20374342, A8R8G8B8: 21 };
 
+/** 'DXT1', 'BC7' ...; a format ClothingStudio cannot read shows its four letters when it has them ('ATI2 (0x32495441)'), else its number. */
 function formatName(f) {
-  if (f === FMT.DXT1) return 'DXT1';
-  if (f === FMT.DXT5) return 'DXT5';
-  if (f === FMT.A8R8G8B8) return 'A8R8G8B8';
-  return '0x' + f.toString(16);
+  for (const name of Object.keys(FMT)) if (FMT[name] === f) return name;
+  const code = Buffer.alloc(4);
+  code.writeUInt32LE(f >>> 0);
+  const letters = code.toString('latin1'), hex = '0x' + (f >>> 0).toString(16);
+  return /^[A-Z0-9]{3,4} ?$/.test(letters) ? `${letters.trim()} (${hex})` : hex;
 }
 
 // ------------------------------------------------------------------ layout
 function levelSize(fmt, w, h) {
   if (fmt === FMT.DXT1) return Math.max(1, (w + 3) >> 2) * Math.max(1, (h + 3) >> 2) * 8;
-  if (fmt === FMT.DXT5) return Math.max(1, (w + 3) >> 2) * Math.max(1, (h + 3) >> 2) * 16;
+  if (fmt === FMT.DXT5 || fmt === FMT.BC7) return Math.max(1, (w + 3) >> 2) * Math.max(1, (h + 3) >> 2) * 16;
   if (fmt === FMT.A8R8G8B8) return w * h * 4;
   throw new Error('unsupported texture format ' + formatName(fmt));
 }
@@ -50,7 +53,7 @@ function readYtd(file) {
     if (!name || width < 1 || height < 1 || width > 8192 || height > 8192 || dataOff < 0) {
       throw new Error('implausible texture header');
     }
-    textures.push({ name, width, height, stride, format, formatName: formatName(format), mips, dataOff });
+    textures.push({ name, width, height, stride, format, formatName: formatName(format), mips, dataOff, objOff: t });
   }
   return { rsc, textures };
 }
@@ -126,6 +129,7 @@ function decodeBGRA(buf, off, w, h, stride) {
 function decodeLevel(buf, off, fmt, w, h, stride) {
   if (fmt === FMT.DXT1) return decodeDXT(buf, off, w, h, false);
   if (fmt === FMT.DXT5) return decodeDXT(buf, off, w, h, true);
+  if (fmt === FMT.BC7) return bc7.decode(buf, off, w, h);
   if (fmt === FMT.A8R8G8B8) return decodeBGRA(buf, off, w, h, stride);
   throw new Error('unsupported texture format ' + formatName(fmt));
 }
@@ -234,6 +238,7 @@ function encodeBGRA(rgba, w, h) {
 function encodeLevel(rgba, w, h, fmt) {
   if (fmt === FMT.DXT1) return encodeDXT(rgba, w, h, false);
   if (fmt === FMT.DXT5) return encodeDXT(rgba, w, h, true);
+  if (fmt === FMT.BC7) return bc7.encode(rgba, w, h);
   if (fmt === FMT.A8R8G8B8) return encodeBGRA(rgba, w, h);
   throw new Error('unsupported texture format ' + formatName(fmt));
 }
@@ -293,9 +298,17 @@ function patchTexture(file, index, rgba, opts = {}) {
   fs.writeFileSync(tmp, Buffer.concat([original.subarray(0, 16), body]));
 
   // verify the new file before it replaces the old one
-  const check = decodeTexture(readYtd(tmp), index);
+  const meanError = meanErrorOf(readYtd(tmp), index, rgba, t.format);
+  if (meanError > 40) { fs.unlinkSync(tmp); throw new Error('verification failed (mean error ' + meanError.toFixed(1) + '); file left untouched'); }
+  fs.renameSync(tmp, file);
+  return { file, backup: madeBackup ? bak : (fs.existsSync(bak) ? bak : null), meanError, bytes: body.length + 16 };
+}
+
+/** How far (mean absolute difference per channel, 0-255) texture `index` of a freshly read .ytd is from the pixels that were meant to be written. */
+function meanErrorOf(ytd, index, rgba, format) {
+  const check = decodeTexture(ytd, index);
   let ref = rgba;
-  if (t.format === FMT.DXT1) {                         // DXT1 only has on/off alpha, and transparent pixels carry no colour
+  if (format === FMT.DXT1) {                           // DXT1 only has on/off alpha, and transparent pixels carry no colour
     ref = Buffer.from(rgba);
     for (let i = 0; i < ref.length; i += 4) {
       if (ref[i + 3] < 128) ref[i] = ref[i + 1] = ref[i + 2] = ref[i + 3] = 0; else ref[i + 3] = 255;
@@ -303,10 +316,88 @@ function patchTexture(file, index, rgba, opts = {}) {
   }
   let err = 0;
   for (let i = 0; i < ref.length; i++) err += Math.abs(check.rgba[i] - ref[i]);
-  const meanError = err / ref.length;
-  if (meanError > 40) { fs.unlinkSync(tmp); throw new Error('verification failed (mean error ' + meanError.toFixed(1) + '); file left untouched'); }
+  return err / ref.length;
+}
+
+// ------------------------------------------------------------------ change the size
+// patchTexture can only rewrite pixels at the size the file already has. Changing the size means a new inflated image:
+// the system segment as it was (only this texture's header changes: width, height, stride, mip count) followed by one
+// graphics page that holds the new mip chain. The page is laid out exactly like the one in the bundled template:
+// the smallest power-of-two page that fits, flagged as "one page of 16 base pages" (base = 0x200 << shift), padded with
+// the 0xCD fill real files use, and the resource version bits of the old flags are kept.
+
+const MAX_RESIZE = 4096;                               // the largest side ClothingStudio writes (a 4096 x 4096 DXT1 texture is about 11 MB in memory, DXT5 about 22 MB)
+const isPow2 = (n) => Number.isInteger(n) && n >= 4 && (n & (n - 1)) === 0;
+const fullChain = (w, h) => Math.floor(Math.log2(Math.max(w, h))) + 1;           // levels from w x h down to 1 x 1
+const strideFor = (fmt, w) => (fmt === FMT.DXT1 ? w / 2 : fmt === FMT.DXT5 || fmt === FMT.BC7 ? w : w * 4);   // bytes of one row of pixels at the format's bits per pixel (the template: 1024 wide DXT1 = 512)
+
+/** Mip levels for a new size: a file that stops short of 1 x 1 (the bundled template stops at 4 x 4) keeps stopping just as far short. */
+function mipsForSize(t, w, h) {
+  if (t.mips <= 1) return 1;
+  const skipped = Math.max(0, fullChain(t.width, t.height) - t.mips);
+  return Math.max(1, fullChain(w, h) - skipped);
+}
+
+/** Graphics page flags for pixel data of `bytes` bytes: one page of 0x2000 << shift bytes, the smallest that fits. */
+function pageFlagsFor(bytes, oldFlags) {
+  let shift = 0;
+  while (shift < 15 && 0x2000 * 2 ** shift < bytes) shift++;
+  const size = 0x2000 * 2 ** shift;
+  if (size < bytes) throw new Error('texture data is too large for one page');
+  return { size, flags: ((((oldFlags >>> 28) << 28) | (1 << 17) | shift) >>> 0) };       // top 4 bits: version, kept; bit 17: one page of 16 base pages
+}
+
+/**
+ * Write `rgba` (width x height pixels) as texture `index` of `file`, changing the texture's size. Only a dictionary that
+ * holds a single texture can change size, and the sides must be powers of two between 4 and MAX_RESIZE. The format and name stay,
+ * the mip levels are regenerated. Like patchTexture: the original is kept once as "<file>.bak", the new file is read back and
+ * checked before it replaces the old one, and on any error the old file is left exactly as it was.
+ */
+function resizeTexture(file, index, width, height, rgba, opts = {}) {
+  if (!isPow2(width) || !isPow2(height) || width > MAX_RESIZE || height > MAX_RESIZE) {
+    throw new Error(`A texture must be a power of two wide and high, from 4 to ${MAX_RESIZE} pixels (${width}x${height} is not).`);
+  }
+  if (rgba.length !== width * height * 4) throw new Error(`pixel data is ${rgba.length / 4} px, new size is ${width}x${height}`);
+  const ytd = readYtd(file), { rsc } = ytd;
+  if (ytd.textures.length !== 1 || index !== 0) throw new Error('Only a .ytd that holds a single texture can change size.');
+  const t = ytd.textures[0];
+  if (t.dataOff !== rsc.sysSize || rsc.buf.length < rsc.sysSize) throw new Error('unexpected texture layout (the pixels do not start the graphics segment); refusing to resize');
+
+  const mips = mipsForSize(t, width, height);
+  const chain = buildChain(rgba, width, height, t.format, mips);
+  if (chain.length !== chainSize(t.format, width, height, mips)) throw new Error('internal error: mip chain size mismatch');
+  const page = pageFlagsFor(chain.length, rsc.gflags);
+  const out = Buffer.alloc(rsc.sysSize + page.size, 0xcd);
+  rsc.buf.copy(out, 0, 0, rsc.sysSize);
+  chain.copy(out, rsc.sysSize);
+  out.writeUInt16LE(width, t.objOff + 0x50);
+  out.writeUInt16LE(height, t.objOff + 0x52);
+  out.writeUInt16LE(t.stride ? Math.round(t.stride * width / t.width) : strideFor(t.format, width), t.objOff + 0x56);
+  out[t.objOff + 0x5d] = mips;
+
+  const original = fs.readFileSync(file);
+  const head = Buffer.from(original.subarray(0, 16));
+  head.writeUInt32LE(page.flags, 12);
+  const bak = file + '.bak';
+  let madeBackup = false;
+  if (opts.backup !== false && !fs.existsSync(bak)) { fs.writeFileSync(bak, original); madeBackup = true; }
+  const body = zlib.deflateRawSync(out, { level: 9 });
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, Buffer.concat([head, body]));
+
+  // read the new file back and check it says what we meant before it replaces the old one
+  let meanError;
+  try {
+    const back = readYtd(tmp), b = back.textures[0];
+    if (back.textures.length !== 1 || b.name !== t.name || b.format !== t.format || b.width !== width || b.height !== height || b.mips !== mips
+        || back.rsc.sysSize !== rsc.sysSize || back.rsc.gfxSize !== page.size || back.rsc.buf.length !== out.length) {
+      throw new Error('verification failed (the new file does not read back as written); file left untouched');
+    }
+    meanError = meanErrorOf(back, 0, rgba, t.format);
+    if (meanError > 40) throw new Error('verification failed (mean error ' + meanError.toFixed(1) + '); file left untouched');
+  } catch (e) { fs.rmSync(tmp, { force: true }); throw e; }
   fs.renameSync(tmp, file);
-  return { file, backup: madeBackup ? bak : (fs.existsSync(bak) ? bak : null), meanError, bytes: body.length + 16 };
+  return { file, backup: madeBackup ? bak : (fs.existsSync(bak) ? bak : null), meanError, bytes: head.length + body.length, width, height, mips, resized: true };
 }
 
 /** Change the texture name stored inside a one-texture dictionary (its name string and the hash in the dictionary header). */
@@ -328,4 +419,4 @@ function renameInner(file, newName) {
   fs.writeFileSync(file, Buffer.concat([original.subarray(0, 16), zlib.deflateRawSync(buf, { level: 9 })]));
 }
 
-module.exports = { FMT, formatName, readYtd, decodeTexture, decodeLevel, patchTexture, buildChain, chainSize, levelSize, renameInner };
+module.exports = { FMT, MAX_RESIZE, formatName, readYtd, decodeTexture, decodeLevel, patchTexture, resizeTexture, mipsForSize, pageFlagsFor, buildChain, chainSize, levelSize, renameInner };

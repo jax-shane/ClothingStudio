@@ -55,7 +55,8 @@ mouse button) pans, **scroll** zooms, **F** fits the whole texture in the window
 Logos should never be painted straight onto the base texture, so they get their own layer.
 
 1. In the **Layers** panel press **Import image…** and pick a PNG with a see-through background. (You can also **drop an
-   image on the window** or paste one with Ctrl+V.)
+   image on the window** or paste one with Ctrl+V.) If the picture is bigger than the texture, the app asks whether to keep the
+   texture's size or make the texture bigger; for a logo, keep it (see [Texture size](USER-GUIDE.md#texture-size)).
 2. The app switches to the **Resize** tool. Drag a **corner** to make it bigger or smaller, drag **inside** to move it,
    drag the round **knob** to turn it. The bar above the canvas has exact numbers (**W**, **H**, **Scale**, **Angle**), **Flip**
    buttons, and **Fit / Fill / Stretch**.
@@ -168,9 +169,12 @@ removed for you.
 
 ## 11. Build a resource for your server
 
-Press **Build**, choose an output folder (and, if you want, a new name). You get a clean FiveM resource: renamed stream files,
+Press **Build**, choose **FiveM resource**, then a name and an output folder. You get a clean FiveM resource: renamed stream files,
 a rebuilt `.ymt` with every piece listed, the `.meta` files and an `fxmanifest.lua`. Copy the folder into your server's
 `resources` folder and add `ensure <name>` to your `server.cfg`.
+
+Playing single player instead? Choose **Single player (dlc.rpf)** in the same dialog: you get a DLC pack for story mode and the steps to
+install it (see the [User guide](USER-GUIDE.md#new-pack-and-build)).
 
 ---
 
