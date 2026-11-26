@@ -175,9 +175,11 @@ describe('Build: a FiveM resource or a single-player pack', () => {
     assert.ok(rep.bytes > 0 && rep.files > 0);
     assert.deepEqual(fs.readdirSync(rep.root).sort(), ['INSTALL.txt', 'dlc.rpf']);
     const src = new FileSource(path.join(rep.root, 'dlc.rpf'));
-    const rpf = new Rpf(null, src, 0, 'dlc.rpf', src.size, '');
-    const names = rpf.entries.filter((e) => e.kind !== 'dir').map((e) => e.path.slice(rpf.path.length + 1));
-    assert.ok(names.includes('content.xml') && names.includes('setup2.xml'), 'the pack is registered: ' + names.join(', '));
+    try {
+      const rpf = new Rpf(null, src, 0, 'dlc.rpf', src.size, '');
+      const names = rpf.entries.filter((e) => e.kind !== 'dir').map((e) => e.path.slice(rpf.path.length + 1));
+      assert.ok(names.includes('content.xml') && names.includes('setup2.xml'), 'the pack is registered: ' + names.join(', '));
+    } finally { src.close(); }                       // Windows cannot remove the folder at the end while the file is still open
   });
   it('a name the game cannot use is refused before any dialog opens', async () => {
     const n = dialogs.length;

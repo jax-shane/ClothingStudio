@@ -15,9 +15,10 @@ const { Rpf, FileSource } = require('../src/lib/rpf');
 const H = require('./helpers');
 const { makePack, add, tex, tempDir, sameColour, RED, GREEN, BLUE } = H;
 
-after(H.cleanup);
+const opened = [];                                  // the archives the tests read: closed before the temporary folders are removed
+after(() => { for (const s of opened.splice(0)) s.close(); H.cleanup(); });   // (Windows cannot remove a folder while a file in it is open)
 
-const openRpf = (f) => { const s = new FileSource(f); return new Rpf(null, s, 0, path.basename(f), s.size, ''); };
+const openRpf = (f) => { const s = new FileSource(f); opened.push(s); return new Rpf(null, s, 0, path.basename(f), s.size, ''); };
 const files = (r) => r.entries.filter((e) => e.kind !== 'dir').map((e) => e.path.slice(r.path.length + 1)).sort();
 const entry = (r, p) => r.entries.find((e) => e.path === r.path + '/' + p.toLowerCase());
 const child = (r, n) => r.children().find((c) => c.name.toLowerCase() === n.toLowerCase());
